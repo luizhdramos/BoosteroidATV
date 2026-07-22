@@ -64,7 +64,7 @@ final class AuthManager {
     func submitCookieHeader(_ raw: String) {
         let cookies = Self.parseCookieHeader(raw)
         guard !cookies.isEmpty else {
-            loginPhase = .failed("Couldn't find any cookies in that text. Copy the whole Application > Storage > Cookies table for cloud.boosteroid.com (select a row, Cmd/Ctrl+A, Cmd/Ctrl+C), or the full 'Cookie' request header value from the Network tab, and paste it here.")
+            loginPhase = .failed("Couldn't find any cookies in that text. Use a cookie-export browser extension (e.g. \"Cookie-Editor\" → Export → JSON), the Application > Storage > Cookies table (select a row, Cmd/Ctrl+A, Cmd/Ctrl+C), or the full 'Cookie' request header from the Network tab, and paste it here.")
             return
         }
         loginTask?.cancel()
@@ -83,17 +83,24 @@ final class AuthManager {
         }
     }
 
-    /// Parses either of the two formats users actually end up pasting:
+    /// Parses any of the three formats users actually end up pasting:
     ///  1. A raw `Cookie:` request-header-style string ("name1=value1;
     ///     name2=value2"), typically hand-selected from DevTools' Network >
     ///     Headers panel. Easy to under-select by accident on a long,
-    ///     visually-wrapped value — see (2) for a more reliable source.
+    ///     visually-wrapped value — see (2)/(3) for more reliable sources.
     ///  2. A copy-paste of Chrome's Application > Storage > Cookies table
     ///     (select all rows, Cmd+C) — tab-separated columns (Name, Value,
-    ///     Domain, ...), one cookie per line. This table shows every cookie,
-    ///     including HttpOnly ones, and copying whole rows avoids the manual
-    ///     text-selection mistakes format (1) is prone to.
+    ///     Domain, ...), one cookie per line.
+    ///  3. A JSON array export from a cookie-management extension (e.g.
+    ///     "Cookie-Editor") — objects with at least "name" and "value"
+    ///     string fields. These extensions hold the browser's `cookies`
+    ///     permission, which (unlike page/console JavaScript) CAN read
+    ///     HttpOnly cookies — this is the most reliable, fully automatable
+    ///     source of the three, since nothing is manually selected by hand.
     private static func parseCookieHeader(_ raw: String) -> [String: String] {
+        if let jsonResult = parseCookieJSON(raw), !jsonResult.isEmpty {
+            return jsonResult
+        }
         if raw.contains("\t") {
             let tableResult = parseCookieTable(raw)
             if !tableResult.isEmpty { return tableResult }
@@ -131,6 +138,30 @@ final class AuthManager {
             let value = parts[1].trimmingCharacters(in: trimSet)
             guard !name.isEmpty, !value.isEmpty else { continue }
             result[name] = value
+        }
+        return result
+    }
+
+    /// Parses a JSON array of cookie objects (e.g. exported by the
+    /// "Cookie-Editor" browser extension), reading only the "name"/"value"
+    /// fields each entry needs and ignoring the rest (domain, path,
+    /// expirationDate, httpOnly, secure, sameSite, ...). Returns nil (not an
+    /// empty dict) if the input isn't a JSON array at all, so callers can
+    /// fall through to the other formats.
+    private static func parseCookieJSON(_ raw: String) -> [String: String]? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("["), let data = trimmed.data(using: .utf8) else { return nil }
+        guard let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+        var result: [String: String] = [:]
+        for entry in array {
+            guard let name = (entry["name"] as? String)?.trimmingCharacters(in: .whitespaces),
+                  !name.isEmpty
+            else { continue }
+            if let value = entry["value"] as? String {
+                result[name] = value
+            } else if let number = entry["value"] as? NSNumber {
+                result[name] = number.stringValue
+            }
         }
         return result
     }
