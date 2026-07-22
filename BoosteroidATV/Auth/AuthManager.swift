@@ -64,7 +64,7 @@ final class AuthManager {
     func submitCookieHeader(_ raw: String) {
         let cookies = Self.parseCookieHeader(raw)
         guard !cookies.isEmpty else {
-            loginPhase = .failed("Couldn't find any cookies in that text. Copy the full 'Cookie' request header value (looks like \"name1=value1; name2=value2; ...\") and paste it here.")
+            loginPhase = .failed("Couldn't find any cookies in that text. Copy the whole Application > Storage > Cookies table for cloud.boosteroid.com (select a row, Cmd/Ctrl+A, Cmd/Ctrl+C), or the full 'Cookie' request header value from the Network tab, and paste it here.")
             return
         }
         loginTask?.cancel()
@@ -83,12 +83,22 @@ final class AuthManager {
         }
     }
 
-    /// Parses a raw `Cookie:` request-header-style string ("name1=value1;
-    /// name2=value2") into a name/value dictionary. Tolerant of the ways this
-    /// tends to actually get pasted by hand: a leading "cookie:" / "-H"
-    /// fragment left over from a browser's "Copy as cURL", wrapping quotes,
-    /// and stray whitespace/newlines.
+    /// Parses either of the two formats users actually end up pasting:
+    ///  1. A raw `Cookie:` request-header-style string ("name1=value1;
+    ///     name2=value2"), typically hand-selected from DevTools' Network >
+    ///     Headers panel. Easy to under-select by accident on a long,
+    ///     visually-wrapped value — see (2) for a more reliable source.
+    ///  2. A copy-paste of Chrome's Application > Storage > Cookies table
+    ///     (select all rows, Cmd+C) — tab-separated columns (Name, Value,
+    ///     Domain, ...), one cookie per line. This table shows every cookie,
+    ///     including HttpOnly ones, and copying whole rows avoids the manual
+    ///     text-selection mistakes format (1) is prone to.
     private static func parseCookieHeader(_ raw: String) -> [String: String] {
+        if raw.contains("\t") {
+            let tableResult = parseCookieTable(raw)
+            if !tableResult.isEmpty { return tableResult }
+        }
+
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Strip a leftover "-H" flag if the whole curl argument got pasted.
@@ -120,6 +130,25 @@ final class AuthManager {
             let name = parts[0].trimmingCharacters(in: trimSet)
             let value = parts[1].trimmingCharacters(in: trimSet)
             guard !name.isEmpty, !value.isEmpty else { continue }
+            result[name] = value
+        }
+        return result
+    }
+
+    /// Parses a tab-separated cookie table paste (Chrome's Application >
+    /// Storage > Cookies panel, whole rows copied): one cookie per line, with
+    /// Name and Value as the first two tab-separated columns. Skips a header
+    /// row if one got selected along with the data.
+    private static func parseCookieTable(_ raw: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: true) {
+            let columns = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard columns.count >= 2 else { continue }
+            let name = columns[0].trimmingCharacters(in: .whitespaces)
+            let value = columns[1].trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !value.isEmpty,
+                  name.caseInsensitiveCompare("name") != .orderedSame
+            else { continue }
             result[name] = value
         }
         return result

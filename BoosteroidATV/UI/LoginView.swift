@@ -68,13 +68,13 @@ struct LoginView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 instructionRow(number: 1, text: "On your phone or computer, open \(BoosteroidAuth.loginStartUrl) and log in.")
-                instructionRow(number: 2, text: "Open your browser's developer tools (Network tab), click any request to cloud.boosteroid.com/api/…, and copy the full 'cookie' request header value.")
-                instructionRow(number: 3, text: "Paste it into the field below and select Sign In.")
+                instructionRow(number: 2, text: "Open developer tools → Application (Storage) tab → Cookies → cloud.boosteroid.com. Click any row, then Cmd/Ctrl+A and Cmd/Ctrl+C to copy the whole table.")
+                instructionRow(number: 3, text: "Paste it into the field below and select Sign In. (A manually-selected 'cookie:' header value from the Network tab also works, but is easy to under-select.)")
             }
             .font(.body)
             .foregroundStyle(.secondary)
 
-            TextField("Paste the Cookie header value here", text: $cookieInput)
+            TextField("Paste the cookie table or Cookie header here", text: $cookieInput)
                 .font(.caption.monospaced())
 
             HStack(spacing: 24) {
