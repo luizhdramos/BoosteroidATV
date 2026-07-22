@@ -2,8 +2,7 @@ import SwiftUI
 
 struct LoginView: View {
     @Environment(AuthManager.self) var authManager
-    @State private var currentURL: URL?
-    @State private var captureTrigger = 0
+    @State private var cookieInput: String = ""
 
     var body: some View {
         ZStack {
@@ -11,8 +10,8 @@ struct LoginView: View {
             switch authManager.loginPhase {
             case .idle:
                 loginPrompt
-            case .awaitingWebLogin(let url):
-                webLogin(url: url)
+            case .manualCookieEntry:
+                manualCookieEntry
             case .exchangingTokens:
                 exchangingView
             case .failed(let message):
@@ -51,41 +50,53 @@ struct LoginView: View {
         .padding(80)
     }
 
-    // MARK: Web Login
+    // MARK: Manual Cookie Entry
     //
-    // TODO(protocol): the "I'm signed in" button below exists only because we
-    // don't yet have automatic success detection (see WebLoginCaptureView's
-    // header comment). Once we know the real signal, replace this with
-    // automatic capture and drop the manual button + debug URL text.
-    private func webLogin(url: URL) -> some View {
-        ZStack(alignment: .bottom) {
-            WebLoginCaptureView(
-                startURL: url,
-                captureTrigger: captureTrigger,
-                onCurrentURLChanged: { currentURL = $0 },
-                onCapture: { cookies in authManager.receivedWebLoginCookies(cookies) }
-            )
-            .ignoresSafeArea()
+    // CONFIRMED 2026-07-22: tvOS ships no WebKit at all (no WKWebView, no
+    // SFSafariViewController, and ASWebAuthenticationSession is explicitly
+    // unavailable on tvOS) — there is no way to render Boosteroid's
+    // Cloudflare-Turnstile-gated login page inside this app. Instead, the
+    // user completes the real login in a browser on another device and
+    // pastes the resulting `Cookie` request header here. Apple TV's "Type on
+    // iPhone" feature (triggered automatically when a text field is focused)
+    // makes pasting a long value into the field below painless.
+    private var manualCookieEntry: some View {
+        VStack(alignment: .leading, spacing: 32) {
+            Text("Sign in on another device")
+                .font(.title.weight(.semibold))
+                .foregroundStyle(.white)
 
-            VStack(spacing: 12) {
-                if let currentURL {
-                    Text(currentURL.absoluteString)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                HStack(spacing: 24) {
-                    Button("I'm signed in") { captureTrigger += 1 }
-                        .buttonStyle(.bordered)
-                        .tint(.orange)
-                    Button("Cancel") { authManager.cancelLogin() }
-                        .buttonStyle(.bordered)
-                        .tint(.gray)
-                }
+            VStack(alignment: .leading, spacing: 12) {
+                instructionRow(number: 1, text: "On your phone or computer, open \(BoosteroidAuth.loginStartUrl) and log in.")
+                instructionRow(number: 2, text: "Open your browser's developer tools (Network tab), click any request to cloud.boosteroid.com/api/…, and copy the full 'cookie' request header value.")
+                instructionRow(number: 3, text: "Paste it into the field below and select Sign In.")
             }
-            .padding(24)
-            .background(.black.opacity(0.6))
+            .font(.body)
+            .foregroundStyle(.secondary)
+
+            TextField("Paste the Cookie header value here", text: $cookieInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption.monospaced())
+
+            HStack(spacing: 24) {
+                Button("Sign In") { authManager.submitCookieHeader(cookieInput) }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                    .disabled(cookieInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel") { authManager.cancelLogin() }
+                    .buttonStyle(.bordered)
+                    .tint(.gray)
+            }
+        }
+        .padding(80)
+        .frame(maxWidth: 1100, alignment: .leading)
+    }
+
+    private func instructionRow(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number).")
+                .fontWeight(.semibold)
+            Text(text)
         }
     }
 

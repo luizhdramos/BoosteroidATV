@@ -6,7 +6,12 @@ import Observation
 
 enum LoginPhase: Equatable {
     case idle
-    case awaitingWebLogin(url: URL)
+    /// tvOS has no WebKit at all (confirmed — the framework isn't shipped on
+    /// this platform, so there's no in-app browser to render Boosteroid's
+    /// Cloudflare-Turnstile-gated login page). The user instead logs in on a
+    /// real browser on another device and pastes the resulting `Cookie`
+    /// request header back into the app — see LoginView's manual entry screen.
+    case manualCookieEntry
     case exchangingTokens
     case failed(String)
 }
@@ -42,13 +47,8 @@ final class AuthManager {
 
     func login() {
         loginTask?.cancel()
-        loginTask = Task {
-            guard let url = URL(string: BoosteroidAuth.loginStartUrl) else {
-                loginPhase = .failed("Invalid login URL.")
-                return
-            }
-            loginPhase = .awaitingWebLogin(url: url)
-        }
+        loginTask = nil
+        loginPhase = .manualCookieEntry
     }
 
     func cancelLogin() {
@@ -57,13 +57,16 @@ final class AuthManager {
         loginPhase = .idle
     }
 
-    /// Called by WebLoginCaptureView once it observes the post-login navigation
-    /// and captures whatever cookies are available at that point.
-    ///
-    /// TODO(protocol): the capture view currently has no reliable signal for
-    /// "login succeeded" (no known success URL/cookie name yet) — see
-    /// WebLoginCaptureView.swift for the exact TODOs.
-    func receivedWebLoginCookies(_ cookies: [String: String]) {
+    /// Called by LoginView's manual entry screen once the user pastes the
+    /// `Cookie` request header value they copied from a real browser login
+    /// (e.g. via their browser's dev tools Network tab). BoosteroidAuthAPI
+    /// validates the cookies against GET /api/v1/user before accepting them.
+    func submitCookieHeader(_ raw: String) {
+        let cookies = Self.parseCookieHeader(raw)
+        guard !cookies.isEmpty else {
+            loginPhase = .failed("Couldn't find any cookies in that text. Copy the full 'Cookie' request header value (looks like \"name1=value1; name2=value2; ...\") and paste it here.")
+            return
+        }
         loginTask?.cancel()
         loginTask = Task {
             loginPhase = .exchangingTokens
@@ -78,6 +81,25 @@ final class AuthManager {
                 loginPhase = .failed(error.localizedDescription)
             }
         }
+    }
+
+    /// Parses a raw `Cookie:` request-header-style string ("name1=value1;
+    /// name2=value2") into a name/value dictionary. Tolerant of extra
+    /// whitespace/newlines since this is pasted by hand.
+    private static func parseCookieHeader(_ raw: String) -> [String: String] {
+        var result: [String: String] = [:]
+        let pairs = raw
+            .replacingOccurrences(of: "\n", with: ";")
+            .split(separator: ";")
+        for pair in pairs {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let name = parts[0].trimmingCharacters(in: .whitespaces)
+            let value = parts[1].trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !value.isEmpty else { continue }
+            result[name] = value
+        }
+        return result
     }
 
     // MARK: Logout
