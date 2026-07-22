@@ -82,7 +82,7 @@ final class InputSender: InputEventHandler {
     private func observeControllers() {
         controllerPollTask = Task { [weak self] in
             while !Task.isCancelled {
-                if let pad = GCController.controllers.first?.extendedGamepad {
+                if let pad = GCController.controllers().first?.extendedGamepad {
                     self?.pollGamepad(pad)
                 }
                 try? await Task.sleep(for: .milliseconds(16)) // ~60Hz poll
