@@ -26,7 +26,7 @@ enum BoosteroidAuth {
     // to log in and copy the Cookie header from — if you logged in with a
     // different browser, change this string to match it (real 401s have been
     // traced to a Safari UA here being paired with Chrome-issued cookies).
-    static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 }
 
 // MARK: - PKCE Helpers

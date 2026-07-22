@@ -20,14 +20,18 @@ import Foundation
 //     Turnstile challenge itself. The login flow is now: user logs in on a
 //     real browser on another device, then pastes the resulting `Cookie`
 //     request header into LoginView's manual entry screen, which lands here.
-//   - CONFIRMED 2026-07-22 (401 debugging): the `access_token` cookie's value
-//     is literally `Bearer+<jwt>` (a PHP/Laravel urlencode() of "Bearer <jwt>",
-//     using "+" for the space rather than "%20"). GET /api/v1/user rejects a
-//     request that only carries this as a cookie (401) — it wants the decoded
-//     value sent as a real `Authorization: Bearer <jwt>` header instead. The
-//     other cookies (`boosteroid_session`, `boosteroid_auth`, `remember_web_*`)
-//     are presumably still what gates the session-based Blade pages like
-//     /dashboard, but the JSON API under /api/v1 is bearer-token authenticated.
+//   - CONFIRMED 2026-07-22 (401 debugging, live in Chrome): a plain
+//     `fetch('/api/v1/user', {credentials:'include'})` from the logged-in
+//     dashboard tab returns 200 using cookies ALONE — no Authorization header
+//     needed. The `access_token` cookie's `Bearer+<jwt>` value (a PHP/Laravel
+//     urlencode() of "Bearer <jwt>") is sent as a belt-and-suspenders
+//     Authorization header below anyway, but it is NOT what makes /api/v1/user
+//     work; cookies are sufficient on their own from a real browser.
+//   - The remaining, most likely gap between "real browser" and "our
+//     URLSession request": browsers always attach `Origin` (and usually
+//     `Referer`) for same-origin fetches, which Laravel/Sanctum-style APIs
+//     commonly check to decide whether to honor cookie-session auth at all
+//     for a given request. Send both explicitly below.
 //   - TODO(protocol): exact cookie name(s) that matter, expiry, and refresh
 //     behavior are still unknown — inspect Set-Cookie response headers during
 //     a real login (e.g. via a local proxy) to fill this in. Until then we
@@ -65,6 +69,9 @@ actor BoosteroidAuthAPI {
         var request = URLRequest(url: userURL)
         request.httpShouldHandleCookies = false
         request.setValue(Self.cookieHeaderValue(cookies), forHTTPHeaderField: "Cookie")
+        request.setValue(BoosteroidAuth.apiBaseUrl, forHTTPHeaderField: "Origin")
+        request.setValue(BoosteroidAuth.apiBaseUrl + "/dashboard", forHTTPHeaderField: "Referer")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
         let bearerToken = Self.decodedAccessToken(from: cookies)
         if let bearerToken {
             request.setValue(bearerToken, forHTTPHeaderField: "Authorization")
