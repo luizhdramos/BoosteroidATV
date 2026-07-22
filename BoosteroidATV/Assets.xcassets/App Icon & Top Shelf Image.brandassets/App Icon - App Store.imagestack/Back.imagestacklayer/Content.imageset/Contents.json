@@ -1,0 +1,6 @@
+{
+  "images" : [
+    { "filename" : "bg_1280x768.png", "idiom" : "tv", "scale" : "1x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}
