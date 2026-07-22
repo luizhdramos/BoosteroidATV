@@ -24,9 +24,22 @@ struct SettingsView: View {
                     }
                 }
                 Section("Controller") {
-                    VStack(alignment: .leading) {
+                    // Note: SwiftUI's Slider (and Stepper) are unavailable on
+                    // tvOS — the platform has no drag/click gesture model for
+                    // them. Use plain focusable buttons instead.
+                    HStack {
                         Text("Deadzone: \(Int(viewModel.streamSettings.controllerDeadzone * 100))%")
-                        Slider(value: $viewModel.streamSettings.controllerDeadzone, in: 0...0.5)
+                        Spacer()
+                        Button {
+                            viewModel.streamSettings.controllerDeadzone = max(0, viewModel.streamSettings.controllerDeadzone - 0.05)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        Button {
+                            viewModel.streamSettings.controllerDeadzone = min(0.5, viewModel.streamSettings.controllerDeadzone + 0.05)
+                        } label: {
+                            Image(systemName: "plus.circle")
+                        }
                     }
                 }
                 Section("Account") {
