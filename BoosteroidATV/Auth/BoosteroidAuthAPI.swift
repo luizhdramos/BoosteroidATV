@@ -28,10 +28,17 @@ import Foundation
 //     endpoint beyond GET /api/v1/user, and that endpoint's response shape,
 //     is still unconfirmed.
 actor BoosteroidAuthAPI {
+    // Ephemeral + httpShouldHandleCookies = false below: URLSession's default
+    // behavior merges any cookies already sitting in HTTPCookieStorage.shared
+    // into every request's Cookie header, on top of whatever we set manually.
+    // With a shared/default session that meant every retry compounded a
+    // previous pasted cookie set with the new one into one giant, malformed
+    // header — the likely cause of the 414 some users hit here. An ephemeral
+    // session never touches the shared cookie jar, so exactly (and only) the
+    // header we set below is what gets sent.
     private let session: URLSession = {
-        let config = URLSessionConfiguration.default
+        let config = URLSessionConfiguration.ephemeral
         config.httpAdditionalHeaders = ["User-Agent": BoosteroidAuth.userAgent]
-        config.httpCookieStorage = HTTPCookieStorage.shared
         return URLSession(configuration: config)
     }()
 
@@ -48,6 +55,7 @@ actor BoosteroidAuthAPI {
             throw AuthError.loginFailed("Invalid user endpoint URL.")
         }
         var request = URLRequest(url: userURL)
+        request.httpShouldHandleCookies = false
         request.setValue(Self.cookieHeaderValue(cookies), forHTTPHeaderField: "Cookie")
         let response: URLResponse
         do {

@@ -84,18 +84,41 @@ final class AuthManager {
     }
 
     /// Parses a raw `Cookie:` request-header-style string ("name1=value1;
-    /// name2=value2") into a name/value dictionary. Tolerant of extra
-    /// whitespace/newlines since this is pasted by hand.
+    /// name2=value2") into a name/value dictionary. Tolerant of the ways this
+    /// tends to actually get pasted by hand: a leading "cookie:" / "-H"
+    /// fragment left over from a browser's "Copy as cURL", wrapping quotes,
+    /// and stray whitespace/newlines.
     private static func parseCookieHeader(_ raw: String) -> [String: String] {
+        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strip a leftover "-H" flag if the whole curl argument got pasted.
+        if cleaned.hasPrefix("-H") {
+            cleaned = String(cleaned.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Strip a single layer of wrapping quotes (curl uses single quotes).
+        if cleaned.count >= 2,
+           let first = cleaned.first, let last = cleaned.last,
+           (first == "'" && last == "'") || (first == "\"" && last == "\"") {
+            cleaned = String(cleaned.dropFirst().dropLast())
+        }
+        // Strip a leading "cookie:" / "Cookie:" header-name prefix.
+        if let colonRange = cleaned.range(of: ":"),
+           cleaned[cleaned.startIndex..<colonRange.lowerBound]
+            .trimmingCharacters(in: .whitespaces)
+            .caseInsensitiveCompare("cookie") == .orderedSame {
+            cleaned = String(cleaned[colonRange.upperBound...])
+        }
+
         var result: [String: String] = [:]
-        let pairs = raw
+        let pairs = cleaned
             .replacingOccurrences(of: "\n", with: ";")
             .split(separator: ";")
         for pair in pairs {
             let parts = pair.split(separator: "=", maxSplits: 1)
             guard parts.count == 2 else { continue }
-            let name = parts[0].trimmingCharacters(in: .whitespaces)
-            let value = parts[1].trimmingCharacters(in: .whitespaces)
+            let trimSet = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "'\""))
+            let name = parts[0].trimmingCharacters(in: trimSet)
+            let value = parts[1].trimmingCharacters(in: trimSet)
             guard !name.isEmpty, !value.isEmpty else { continue }
             result[name] = value
         }
