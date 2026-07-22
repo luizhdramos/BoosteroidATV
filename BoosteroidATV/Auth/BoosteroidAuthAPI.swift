@@ -20,6 +20,14 @@ import Foundation
 //     Turnstile challenge itself. The login flow is now: user logs in on a
 //     real browser on another device, then pastes the resulting `Cookie`
 //     request header into LoginView's manual entry screen, which lands here.
+//   - CONFIRMED 2026-07-22 (401 debugging): the `access_token` cookie's value
+//     is literally `Bearer+<jwt>` (a PHP/Laravel urlencode() of "Bearer <jwt>",
+//     using "+" for the space rather than "%20"). GET /api/v1/user rejects a
+//     request that only carries this as a cookie (401) — it wants the decoded
+//     value sent as a real `Authorization: Bearer <jwt>` header instead. The
+//     other cookies (`boosteroid_session`, `boosteroid_auth`, `remember_web_*`)
+//     are presumably still what gates the session-based Blade pages like
+//     /dashboard, but the JSON API under /api/v1 is bearer-token authenticated.
 //   - TODO(protocol): exact cookie name(s) that matter, expiry, and refresh
 //     behavior are still unknown — inspect Set-Cookie response headers during
 //     a real login (e.g. via a local proxy) to fill this in. Until then we
@@ -57,6 +65,10 @@ actor BoosteroidAuthAPI {
         var request = URLRequest(url: userURL)
         request.httpShouldHandleCookies = false
         request.setValue(Self.cookieHeaderValue(cookies), forHTTPHeaderField: "Cookie")
+        let bearerToken = Self.decodedAccessToken(from: cookies)
+        if let bearerToken {
+            request.setValue(bearerToken, forHTTPHeaderField: "Authorization")
+        }
         let response: URLResponse
         do {
             (_, response) = try await session.data(for: request)
@@ -78,7 +90,7 @@ actor BoosteroidAuthAPI {
             membershipTier: "unknown"
         )
         let tokens = AuthTokens(
-            accessToken: "",
+            accessToken: bearerToken ?? "",
             refreshToken: nil,
             sessionCookies: cookies,
             // TODO(protocol): placeholder expiry — we don't know the real session
@@ -90,6 +102,14 @@ actor BoosteroidAuthAPI {
 
     private static func cookieHeaderValue(_ cookies: [String: String]) -> String {
         cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; ")
+    }
+
+    /// The `access_token` cookie's value is a PHP/Laravel urlencode() of the
+    /// literal string "Bearer <jwt>" — decode the "+"-for-space encoding back
+    /// into a real `Authorization` header value.
+    private static func decodedAccessToken(from cookies: [String: String]) -> String? {
+        guard let raw = cookies["access_token"] else { return nil }
+        return raw.replacingOccurrences(of: "+", with: " ")
     }
 
     /// TODO(protocol): no known refresh mechanism yet. Once cookies/tokens expire,
