@@ -75,7 +75,6 @@ struct LoginView: View {
             .foregroundStyle(.secondary)
 
             TextField("Paste the Cookie header value here", text: $cookieInput)
-                .textFieldStyle(.roundedBorder)
                 .font(.caption.monospaced())
 
             HStack(spacing: 24) {
