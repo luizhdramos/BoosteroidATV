@@ -20,7 +20,13 @@ enum BoosteroidAuth {
     /// (e.g. "sp0.cloud.boosteroid.com" — see SessionInfo.nodeBaseUrl).
     static let apiBaseUrl = "https://cloud.boosteroid.com"
 
-    static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+    // NOTE: Cloudflare's `cf_clearance` cookie (and possibly Boosteroid's own
+    // session check) is tied to the User-Agent that was active when the
+    // cookies were issued. This must match whatever browser you actually used
+    // to log in and copy the Cookie header from — if you logged in with a
+    // different browser, change this string to match it (real 401s have been
+    // traced to a Safari UA here being paired with Chrome-issued cookies).
+    static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 }
 
 // MARK: - PKCE Helpers
