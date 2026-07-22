@@ -76,15 +76,27 @@ actor BoosteroidAuthAPI {
         if let bearerToken {
             request.setValue(bearerToken, forHTTPHeaderField: "Authorization")
         }
+        let data: Data
         let response: URLResponse
         do {
-            (_, response) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw AuthError.loginFailed("Couldn't reach Boosteroid to validate the cookies: \(error.localizedDescription)")
         }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw AuthError.loginFailed("Boosteroid rejected the pasted cookies (GET /api/v1/user returned \(status)). Make sure you copied the Cookie header after fully logging in, and that the session hasn't expired.")
+            // Surface the actual response body (truncated) and what we parsed
+            // and sent, instead of just the status code — a Cloudflare
+            // challenge page, an HTML error page, and a real Laravel JSON 401
+            // all need very different fixes, and guessing blind past this
+            // point has not been productive.
+            let bodyPreview = String(data: data.prefix(400), encoding: .utf8) ?? "<non-UTF8 body, \(data.count) bytes>"
+            let cookieNames = cookies.keys.sorted().joined(separator: ", ")
+            throw AuthError.loginFailed("""
+                Boosteroid rejected the pasted cookies (GET /api/v1/user returned \(status)).
+                Parsed \(cookies.count) cookies: \(cookieNames)
+                Response body: \(bodyPreview)
+                """)
         }
         // TODO(protocol): replace with a real call to whatever endpoint returns the
         // logged-in user's profile (id, display name, email, plan/tier) — GET

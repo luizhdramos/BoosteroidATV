@@ -122,10 +122,16 @@ struct LoginView: View {
             Text("Sign In Failed")
                 .font(.title.weight(.semibold))
                 .foregroundStyle(.white)
-            Text(message)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            // Diagnostic messages (response body, parsed cookie names) can be
+            // long — scroll rather than clip off-screen.
+            ScrollView {
+                Text(message)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 400)
 
             HStack(spacing: 24) {
                 Button("Try Again") { authManager.login() }
