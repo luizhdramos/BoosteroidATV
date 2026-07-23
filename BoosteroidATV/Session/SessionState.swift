@@ -67,11 +67,14 @@ struct ActiveSessionInfo {
 // assumed it might be SSR-embedded instead — it isn't). Standard Laravel
 // pagination envelope: {"data":[...],"links":{...},"meta":{...}}. Each
 // element of `data` has (confirmed field names/types):
-//   id: Int, name: String, icon: String (URL), bannerImage: String (URL),
-//   installed: Bool, genre/tags: arrays, platform/stores: objects,
-//   plus publisher/developer/maintenance/unavailable/monetizeType/controller/
-//   launchLimit/underEula/isOptimized/cardColor/storePromo/createdAt — present
-//   but not yet needed, so not decoded below (Codable ignores unknown keys).
+//   id: Int, name: String, icon: String (URL, CONFIRMED 200x200 square),
+//   bannerImage: String (URL, CONFIRMED 2560x1440 = 16:9 landscape — use for
+//   a future hero/banner section, NOT the grid; using it there produced
+//   badly-cropped "truncated"-looking tiles), installed: Bool, genre/tags:
+//   arrays, platform/stores: objects, plus publisher/developer/maintenance/
+//   unavailable/monetizeType/controller/launchLimit/underEula/isOptimized/
+//   cardColor/storePromo/createdAt — present but not yet needed, so not
+//   decoded below (Codable ignores unknown keys).
 // GET /api/v1/boostore/applications/{id} (single game) and
 // GET /api/v1/boostore/carousel?isSub=true (hero banner) presumably share
 // this same per-application shape; TODO(protocol) confirm once used.
@@ -103,7 +106,9 @@ struct GameInfo: Identifiable, Equatable {
     init(_ dto: BoosteroidApplicationDTO) {
         self.id = String(dto.id)
         self.title = dto.name
-        self.boxArtUrl = dto.bannerImage ?? dto.icon
+        // `icon` (square) for grid tiles — `bannerImage` is a wide 16:9
+        // banner, wrong shape for the portrait/square tiles HomeView draws.
+        self.boxArtUrl = dto.icon ?? dto.bannerImage
         self.isInLibrary = dto.installed
     }
 }

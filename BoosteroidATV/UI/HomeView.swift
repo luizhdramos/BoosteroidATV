@@ -24,7 +24,7 @@ struct HomeView: View {
                             Button { onPlay(game) } label: {
                                 VStack(alignment: .leading, spacing: 8) {
                                     coverArt(for: game)
-                                        .aspectRatio(3/4, contentMode: .fit)
+                                        .aspectRatio(1, contentMode: .fit)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
                                     Text(game.title).font(.headline).lineLimit(1)
                                 }
