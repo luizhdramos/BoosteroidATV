@@ -59,7 +59,7 @@ final class StreamController: NSObject {
 
     // MARK: Connect
 
-    func connect(session: SessionInfo, settings: StreamSettings) async {
+    func connect(session: SessionInfo, settings: StreamSettings, cookies: [String: String]) async {
         switch state {
         case .connecting, .streaming: return
         default: break
@@ -68,16 +68,16 @@ final class StreamController: NSObject {
         sessionInfo = session
         self.settings = settings
 
-        // TODO(protocol): nodeBaseUrl comes from session/details' success
-        // body, which BoosteroidClient.fetchSessionDetails hasn't been able
-        // to capture/decode yet (see its doc comment) — so today this always
-        // fails here with a clear message instead of silently misbehaving.
+        // nodeBaseUrl comes from session/details' CONFIRMED success body
+        // ({"data":{"gw":...}}) — see BoosteroidClient.fetchSessionDetails.
+        // Still guarded defensively since SessionInfo instances built from
+        // last-session (still-queued state) never populate it.
         guard let nodeBaseUrl = session.nodeBaseUrl else {
-            state = .failed(message: "Session became active but its node/gateway host (nodeBaseUrl) hasn't been decoded yet — see BoosteroidClient.fetchSessionDetails TODO(protocol).")
+            state = .failed(message: "Session became active but its node/gateway host (nodeBaseUrl) is missing — this shouldn't happen once fetchSessionDetails has run; please report this.")
             return
         }
 
-        let client = BoosteroidSignalingClient(nodeBaseUrl: nodeBaseUrl, sessionId: session.sessionId)
+        let client = BoosteroidSignalingClient(nodeBaseUrl: nodeBaseUrl, sessionId: session.sessionId, cookies: cookies)
         client.onEvent = { [weak self] event in
             Task { @MainActor in self?.handleSignalingEvent(event) }
         }

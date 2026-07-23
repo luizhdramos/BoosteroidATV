@@ -139,10 +139,12 @@ actor BoosteroidRealtimeClient {
         let type = obj["type"] as? String
         let action = obj["action"] as? String
 
-        if let value = obj["value"] as? [String: Any], let appId = value["appId"] as? Int {
-            let position = value["position"] as? Int
-            let eta = value["eta"] as? Int
-            continuation.yield(.queueUpdate(appId: appId, position: position, eta: eta))
+        // Lenient on purpose: a real message carrying this shape has never
+        // actually been observed (see header comment) — only inferred from
+        // NgRx state — so this tolerates appId/position/eta arriving as
+        // either JSON numbers or numeric strings rather than assuming.
+        if let value = obj["value"] as? [String: Any], let appId = Self.asInt(value["appId"]) {
+            continuation.yield(.queueUpdate(appId: appId, position: Self.asInt(value["position"]), eta: Self.asInt(value["eta"])))
             return
         }
         if type == "pong" { return }
@@ -152,5 +154,12 @@ actor BoosteroidRealtimeClient {
         }
         let valueDescription = (obj["value"] as Any?).map { String(describing: $0) } ?? "nil"
         continuation.yield(.raw(type: type, action: action, description: valueDescription))
+    }
+
+    private static func asInt(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let s = value as? String { return Int(s) }
+        if let d = value as? Double { return Int(d) }
+        return nil
     }
 }

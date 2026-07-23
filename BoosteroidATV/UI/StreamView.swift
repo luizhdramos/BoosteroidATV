@@ -136,7 +136,7 @@ struct StreamView: View {
                     queueStatus = info.status
                 }
             )
-            await controller.connect(session: session, settings: settings)
+            await controller.connect(session: session, settings: settings, cookies: cookies)
         } catch {
             errorMessage = error.localizedDescription
         }

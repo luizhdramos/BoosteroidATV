@@ -84,11 +84,12 @@ enum SignalingEvent {
 //      channel is behind the still-unconfirmed queue/session WebSocket. Worth
 //      checking for a `/webrtc/api/hangup` counterpart in the OSS project.
 final class BoosteroidSignalingClient {
-    /// The per-node WebRTC gateway host, e.g. "https://sp0.cloud.boosteroid.com".
-    /// TODO(protocol): confirm where this comes from — presumably a field in
-    /// the `session/details` response, not hardcoded.
+    /// The per-node WebRTC gateway host, e.g. "https://sp7.cloud.boosteroid.com:443"
+    /// — CONFIRMED to come from `session/details`'s `data.gw` field, see
+    /// BoosteroidClient.fetchSessionDetails.
     private let nodeBaseUrl: String
     private let sessionId: String
+    private let cookies: [String: String]
     private let peerId: String = String(Double.random(in: 0..<1))
 
     private let session: URLSession = {
@@ -101,9 +102,26 @@ final class BoosteroidSignalingClient {
 
     var onEvent: ((SignalingEvent) -> Void)?
 
-    init(nodeBaseUrl: String, sessionId: String) {
+    /// SUSPECTED FIX 2026-07-22 (not live-confirmed — didn't want to risk
+    /// disrupting a real user's own active session to test it): every
+    /// `webrtc/api/*` call to the per-node host below was previously sent
+    /// with NO cookies and no auth of any kind — the browser's own calls to
+    /// the exact same endpoints always carry cookies automatically (same
+    /// parent domain, `cloud.boosteroid.com` / `sp7.cloud.boosteroid.com`),
+    /// so that was never actually tested against Boosteroid's real
+    /// behavior. A reported crash matching Swift/Foundation's exact
+    /// "the data couldn't be read because it is missing" message — which is
+    /// what `JSONDecoder` throws when handed a zero-byte response body —
+    /// happening right as the game loads (i.e. right when these calls would
+    /// fire) is consistent with the node rejecting an unauthenticated
+    /// request with an empty body instead of the expected JSON. Cookies are
+    /// threaded through here now; if this wasn't the actual cause, the next
+    /// thing to check is whether `getIceServers`/`getParams` ever return a
+    /// genuinely empty 200 body for some other reason.
+    init(nodeBaseUrl: String, sessionId: String, cookies: [String: String]) {
         self.nodeBaseUrl = nodeBaseUrl
         self.sessionId = sessionId
+        self.cookies = cookies
     }
 
     // MARK: Connect
@@ -119,14 +137,31 @@ final class BoosteroidSignalingClient {
     }
 
     func fetchIceServers() async throws -> [IceServer] {
-        let (data, _) = try await session.data(from: url("getIceServers"))
+        let (data, response) = try await session.data(for: authenticatedRequest(url("getIceServers")))
+        try Self.throwIfEmptyOrNonJSON(data: data, response: response, endpoint: "getIceServers")
         let decoded = try JSONDecoder().decode(IceServersResponse.self, from: data)
         return decoded.iceServers
     }
 
     func fetchParams() async throws -> StreamParams {
-        let (data, _) = try await session.data(from: url("getParams"))
+        let (data, response) = try await session.data(for: authenticatedRequest(url("getParams")))
+        try Self.throwIfEmptyOrNonJSON(data: data, response: response, endpoint: "getParams")
         return try JSONDecoder().decode(StreamParams.self, from: data)
+    }
+
+    /// Surfaces a clear, actionable error instead of letting `JSONDecoder`
+    /// fail with its generic (and, out of context, confusing) "the data
+    /// couldn't be read because it is missing" message — which is exactly
+    /// what decoding zero-byte Data throws. A reported crash matching that
+    /// message right as the game loads is what prompted adding cookies to
+    /// every request in this file in the first place (see the init's doc
+    /// comment) — this check makes any *remaining* auth/empty-body problem
+    /// self-explanatory instead of a cryptic Foundation error string.
+    private static func throwIfEmptyOrNonJSON(data: Data, response: URLResponse, endpoint: String) throws {
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard !data.isEmpty else {
+            throw SignalingError.callFailed("\(endpoint) returned an empty body (HTTP \(status)) — likely an auth/session problem talking to the streaming node, not a real ICE/params response.")
+        }
     }
 
     // MARK: Send Offer / Receive Answer
@@ -137,9 +172,7 @@ final class BoosteroidSignalingClient {
     // re-capture (e.g. via a local mitmproxy on your own Mac rather than the
     // sandboxed browser tool, which blocks raw body dumps).
     func sendOffer(sdp: String) async throws -> String {
-        var request = URLRequest(url: url("call"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var request = authenticatedRequest(url("call"), method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["sdp": sdp, "type": "offer"])
         let (data, response) = try await session.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
@@ -156,9 +189,7 @@ final class BoosteroidSignalingClient {
 
     func sendICECandidate(candidate: String, sdpMid: String?, sdpMLineIndex: Int?) {
         Task {
-            var request = URLRequest(url: url("addIceCandidate"))
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            var request = authenticatedRequest(url("addIceCandidate"), method: "POST")
             var payload: [String: Any] = ["candidate": candidate]
             if let sdpMid { payload["sdpMid"] = sdpMid }
             if let sdpMLineIndex { payload["sdpMLineIndex"] = sdpMLineIndex }
@@ -179,7 +210,7 @@ final class BoosteroidSignalingClient {
             guard let self else { return }
             while !Task.isCancelled {
                 do {
-                    let (data, _) = try await self.session.data(from: self.url("getIceCandidate"))
+                    let (data, _) = try await self.session.data(for: self.authenticatedRequest(self.url("getIceCandidate")))
                     if let candidates = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
                         for c in candidates {
                             guard let candidate = c["candidate"] as? String else { continue }
@@ -206,6 +237,23 @@ final class BoosteroidSignalingClient {
     }
 
     // MARK: Private
+
+    /// Adds the same Cookie/Origin/Referer/Accept headers `BoosteroidClient`
+    /// uses for the main `cloud.boosteroid.com` API — see this file's init
+    /// doc comment for why this node host needed the same treatment.
+    private func authenticatedRequest(_ url: URL, method: String = "GET") -> URLRequest {
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.httpShouldHandleCookies = false
+        req.setValue(cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+        req.setValue(BoosteroidAuth.apiBaseUrl, forHTTPHeaderField: "Origin")
+        req.setValue(BoosteroidAuth.apiBaseUrl + "/dashboard", forHTTPHeaderField: "Referer")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if method == "POST" {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        return req
+    }
 
     private func url(_ path: String) -> URL {
         var comps = URLComponents(string: "\(nodeBaseUrl)/webrtc/api/\(path)")!
