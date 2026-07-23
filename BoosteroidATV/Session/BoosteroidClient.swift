@@ -105,14 +105,19 @@ actor BoosteroidClient {
         let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // CONFIRMED 2026-07-22: a first guess of "applicationId" got back
-        // {"appld":["The app id field is required."]} — Laravel's default
-        // validation message humanizes a snake_case attribute name by
-        // replacing underscores with spaces, so "app id" implies the real
-        // field is "app_id". TODO(protocol): still unconfirmed whether any
-        // other fields (resolution/fps/region?) are required alongside it.
+        // CONFIRMED 2026-07-22: "applicationId" got back
+        // {"appld":["The app id field is required."]} — then "app_id" got the
+        // SAME error verbatim (ruled out via a full app delete + clean build
+        // + reinstall, so it wasn't a stale-binary artifact). Laravel's
+        // FormatsMessages::getAttribute() actually snake_cases the attribute
+        // name BEFORE turning underscores into spaces, so "app id" is
+        // ambiguous between "app_id" and camelCase "appId" — both produce the
+        // identical message. Send both spellings together as a cheap hedge
+        // instead of guessing one at a time. TODO(protocol): still unconfirmed
+        // whether other fields (resolution/fps/region?) are required too —
+        // if this still 422s, the response body will now at least say which.
         let appIdValue: Any = Int(request.gameId) ?? request.gameId
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["app_id": appIdValue])
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["app_id": appIdValue, "appId": appIdValue])
         let (data, response) = try await session.data(for: req)
         guard (response as? HTTPURLResponse)?.statusCode == 204 else {
             throw BoosteroidClientError.requestFailed("createSession/enqueue", String(data: data, encoding: .utf8) ?? "")
