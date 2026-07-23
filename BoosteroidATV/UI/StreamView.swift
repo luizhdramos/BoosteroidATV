@@ -78,11 +78,11 @@ struct StreamView: View {
 
     private func start() async {
         do {
-            let token = try await authManager.resolveToken()
+            let cookies = try await authManager.resolveCookies()
             let client = BoosteroidClient()
             let session = try await client.createSession(
                 SessionCreateRequest(gameId: game.id, settings: settings),
-                token: token
+                cookies: cookies
             )
             await controller.connect(session: session, settings: settings)
         } catch {

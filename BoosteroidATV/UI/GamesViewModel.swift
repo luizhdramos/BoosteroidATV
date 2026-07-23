@@ -25,7 +25,7 @@ class GamesViewModel {
         do {
             let cookies = try await authManager.resolveCookies()
             library = try await client.fetchLibrary(cookies: cookies)
-            activeSessions = (try? await client.getActiveSessions(token: "")) ?? []
+            activeSessions = (try? await client.getActiveSessions(cookies: cookies)) ?? []
         } catch {
             self.error = error.localizedDescription
         }

@@ -23,8 +23,15 @@ actor BoosteroidClient {
 
     private let apiBase = "https://cloud.boosteroid.com/api"
 
-    private func authenticatedRequest(_ url: URL, cookies: [String: String]) -> URLRequest {
+    /// Every /api/v1 and /api/v2 call needs this — CONFIRMED (both from the
+    /// /api/v1/user 401 saga and from createSession/enqueue hitting the same
+    /// "Unauthenticated." error until it was routed through this): the API is
+    /// cookie-session authenticated, and needs Origin/Referer to match the
+    /// real frontend for Laravel/Sanctum-style backends to honor that cookie
+    /// session at all.
+    private func authenticatedRequest(_ url: URL, cookies: [String: String], method: String = "GET") -> URLRequest {
         var req = URLRequest(url: url)
+        req.httpMethod = method
         req.httpShouldHandleCookies = false
         req.setValue(cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
         req.setValue(BoosteroidAuth.apiBaseUrl, forHTTPHeaderField: "Origin")
@@ -52,14 +59,18 @@ actor BoosteroidClient {
         return page.data.map(GameInfo.init)
     }
 
-    func fetchApplication(id: String) async throws -> GameInfo {
-        // CONFIRMED URL. TODO(protocol): response body shape not captured —
-        // decode once you have a real sample.
-        let (data, response) = try await session.data(from: URL(string: "\(apiBase)/v1/boostore/applications/\(id)")!)
+    func fetchApplication(id: String, cookies: [String: String]) async throws -> GameInfo {
+        // CONFIRMED URL. Presumably the same per-application shape as the
+        // installed-list's entries (BoosteroidApplicationDTO) — TODO(protocol):
+        // confirm, since this single-item response hasn't actually been
+        // captured/decoded yet, just assumed.
+        let url = URL(string: "\(apiBase)/v1/boostore/applications/\(id)")!
+        let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw BoosteroidClientError.requestFailed("fetchApplication", String(data: data, encoding: .utf8) ?? "")
         }
-        throw BoosteroidClientError.notImplemented("fetchApplication — decode step not written; response shape unconfirmed")
+        let dto = try JSONDecoder().decode(BoosteroidApplicationDTO.self, from: data)
+        return GameInfo(dto)
     }
 
     // MARK: Current User
@@ -68,8 +79,9 @@ actor BoosteroidClient {
     // session — good liveness/validation check for AuthManager, but response
     // body shape unconfirmed.
 
-    func fetchCurrentUser() async throws {
-        let (data, response) = try await session.data(from: URL(string: "\(apiBase)/v1/user")!)
+    func fetchCurrentUser(cookies: [String: String]) async throws {
+        let url = URL(string: "\(apiBase)/v1/user")!
+        let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw BoosteroidClientError.requestFailed("fetchCurrentUser", String(data: data, encoding: .utf8) ?? "")
         }
@@ -89,9 +101,9 @@ actor BoosteroidClient {
     //      → 200, presumably returning the per-node WebRTC gateway host (e.g.
     //      the confirmed "sp0.cloud.boosteroid.com") — see SessionInfo.
 
-    func createSession(_ request: SessionCreateRequest, token: String) async throws -> SessionInfo {
-        var req = URLRequest(url: URL(string: "\(apiBase)/v2/streaming/session/enqueue")!)
-        req.httpMethod = "POST"
+    func createSession(_ request: SessionCreateRequest, cookies: [String: String]) async throws -> SessionInfo {
+        let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
+        var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // TODO(protocol): request body unconfirmed — guessing at minimum the
         // application id is required. Replace once captured.
@@ -108,14 +120,15 @@ actor BoosteroidClient {
     /// TODO(protocol): queue progress appears to be pushed (not polled) based
     /// on the capture — this REST poll is a placeholder until the real
     /// transport is confirmed.
-    func pollSession(sessionId: String, token: String) async throws -> SessionInfo {
+    func pollSession(sessionId: String, cookies: [String: String]) async throws -> SessionInfo {
         throw BoosteroidClientError.notImplemented("pollSession — queue updates appear to be pushed, not polled; real transport unconfirmed")
     }
 
     /// CONFIRMED URL: GET /api/v1/streaming/user/last-session → 200. Likely
     /// used to detect/resume an in-progress session. Response shape unconfirmed.
-    func getActiveSessions(token: String) async throws -> [ActiveSessionInfo] {
-        let (data, response) = try await session.data(from: URL(string: "\(apiBase)/v1/streaming/user/last-session")!)
+    func getActiveSessions(cookies: [String: String]) async throws -> [ActiveSessionInfo] {
+        let url = URL(string: "\(apiBase)/v1/streaming/user/last-session")!
+        let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw BoosteroidClientError.requestFailed("getActiveSessions", String(data: data, encoding: .utf8) ?? "")
         }
@@ -127,7 +140,7 @@ actor BoosteroidClient {
     /// fetch-level capture used here didn't catch it, so it may go out over
     /// XHR, `navigator.sendBeacon`, or the same unconfirmed WebSocket used for
     /// queue updates. Needs a dedicated capture pass.
-    func stopSession(sessionId: String, token: String) async throws {
+    func stopSession(sessionId: String, cookies: [String: String]) async throws {
         throw BoosteroidClientError.notImplemented("stopSession — teardown call not isolated in the capture yet")
     }
 }
