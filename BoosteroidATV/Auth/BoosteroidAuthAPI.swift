@@ -123,6 +123,23 @@ actor BoosteroidAuthAPI {
         cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; ")
     }
 
+    /// Fetches a plain-text/JSON body from an arbitrary URL — used when the
+    /// user pastes a link to a cookie export (iCloud Drive share, Gist raw
+    /// URL, etc.) instead of the cookie text itself, since Apple TV's remote
+    /// text input has been confirmed to truncate very long pastes but handles
+    /// a short URL fine.
+    func fetchText(from url: URL) async throws -> String {
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw AuthError.loginFailed("Fetching that link returned HTTP \(status).")
+        }
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw AuthError.loginFailed("That link didn't return readable text.")
+        }
+        return text
+    }
+
     /// The `access_token` cookie's value is a PHP/Laravel urlencode() of the
     /// literal string "Bearer <jwt>" — decode the "+"-for-space encoding back
     /// into a real `Authorization` header value.

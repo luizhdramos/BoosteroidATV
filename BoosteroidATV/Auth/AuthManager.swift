@@ -57,14 +57,54 @@ final class AuthManager {
         loginPhase = .idle
     }
 
-    /// Called by LoginView's manual entry screen once the user pastes the
-    /// `Cookie` request header value they copied from a real browser login
-    /// (e.g. via their browser's dev tools Network tab). BoosteroidAuthAPI
-    /// validates the cookies against GET /api/v1/user before accepting them.
+    /// Called by LoginView's manual entry screen with whatever the user typed
+    /// or pasted. Two shapes are accepted:
+    ///  - A plain URL (nothing else) pointing at a file containing the
+    ///    cookie export (an iCloud Drive "Copy Link" share, a GitHub Gist raw
+    ///    URL, a paste.ee link, etc.) — the URL is fetched and its body is
+    ///    parsed instead. This exists because Apple TV's remote-driven text
+    ///    input (Continuity "Type on iPhone" included) has been confirmed to
+    ///    silently truncate very long pastes (~4000 typed characters arrived
+    ///    as ~500) — typing/pasting a short URL is far more reliable than the
+    ///    multi-thousand-character cookie export itself.
+    ///  - The cookie data directly (see parseCookieHeader for the formats
+    ///    accepted), for short-enough cases or once a more reliable on-device
+    ///    input method exists.
     func submitCookieHeader(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = Self.asFetchableURL(trimmed) {
+            loginTask?.cancel()
+            loginTask = Task {
+                loginPhase = .exchangingTokens
+                do {
+                    let fetchedText = try await api.fetchText(from: url)
+                    completeLogin(withRawCookieText: fetchedText)
+                } catch {
+                    loginPhase = .failed("Couldn't download cookies from that link: \(error.localizedDescription)")
+                }
+            }
+            return
+        }
+        completeLogin(withRawCookieText: raw)
+    }
+
+    /// Returns `trimmed` as a URL to fetch, but only if it looks like *just*
+    /// a URL and not cookie data that happens to contain "http://" somewhere
+    /// (a cookie value could legitimately contain that as a substring).
+    private static func asFetchableURL(_ trimmed: String) -> URL? {
+        guard !trimmed.contains("="), !trimmed.contains("{"), !trimmed.contains("\t"), !trimmed.contains(";"),
+              !trimmed.contains(" "), !trimmed.contains("\n")
+        else { return nil }
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { return nil }
+        return url
+    }
+
+    private func completeLogin(withRawCookieText raw: String) {
         let cookies = Self.parseCookieHeader(raw)
         guard !cookies.isEmpty else {
-            loginPhase = .failed("Couldn't find any cookies in that text. Use a cookie-export browser extension (e.g. \"Cookie-Editor\" → Export → JSON), the Application > Storage > Cookies table (select a row, Cmd/Ctrl+A, Cmd/Ctrl+C), or the full 'Cookie' request header from the Network tab, and paste it here.")
+            loginPhase = .failed("Couldn't find any cookies in that text. Use a cookie-export browser extension (e.g. \"Cookie-Editor\" → Export → JSON), the Application > Storage > Cookies table (select a row, Cmd/Ctrl+A, Cmd/Ctrl+C), or the full 'Cookie' request header from the Network tab. If pasting the full text keeps getting cut short on the Apple TV, save it to a file (iCloud Drive, a Gist, paste.ee, ...), get a share link, and paste just that link here instead.")
             return
         }
         loginTask?.cancel()

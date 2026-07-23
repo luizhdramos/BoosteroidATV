@@ -55,11 +55,15 @@ struct LoginView: View {
     // CONFIRMED 2026-07-22: tvOS ships no WebKit at all (no WKWebView, no
     // SFSafariViewController, and ASWebAuthenticationSession is explicitly
     // unavailable on tvOS) — there is no way to render Boosteroid's
-    // Cloudflare-Turnstile-gated login page inside this app. Instead, the
-    // user completes the real login in a browser on another device and
-    // pastes the resulting `Cookie` request header here. Apple TV's "Type on
-    // iPhone" feature (triggered automatically when a text field is focused)
-    // makes pasting a long value into the field below painless.
+    // Cloudflare-Turnstile-gated login page inside this app. The user instead
+    // completes the real login in a browser on another device and gets the
+    // resulting cookies here.
+    //
+    // CONFIRMED on a real Apple TV: pasting the ~4000-character cookie export
+    // directly into a text field is NOT reliable — it silently arrived
+    // truncated to ~500 characters. Recommend a link instead: the user saves
+    // the export to a file (iCloud Drive, a Gist, paste.ee, ...), and only
+    // has to type/paste a short URL here, which the app downloads itself.
     private var manualCookieEntry: some View {
         VStack(alignment: .leading, spacing: 32) {
             Text("Sign in on another device")
@@ -68,13 +72,14 @@ struct LoginView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 instructionRow(number: 1, text: "On your phone or computer, open \(BoosteroidAuth.loginStartUrl) and log in.")
-                instructionRow(number: 2, text: "Recommended: install the free \"Cookie-Editor\" browser extension, open it on cloud.boosteroid.com, and use Export → JSON (copies everything automatically, no manual selecting).")
-                instructionRow(number: 3, text: "Paste it into the field below and select Sign In. (DevTools' Application → Cookies table, or a hand-selected 'cookie:' header from the Network tab, also work — but are easier to under-select by mistake.)")
+                instructionRow(number: 2, text: "Install the free \"Cookie-Editor\" browser extension, open it on cloud.boosteroid.com, and use Export → JSON — save it as a file.")
+                instructionRow(number: 3, text: "Recommended: put that file in iCloud Drive (or a Gist/paste.ee), get a share link, and paste just the LINK below — typing/pasting the full cookie text directly on the Apple TV has been unreliable for long values.")
+                instructionRow(number: 4, text: "Select Sign In.")
             }
             .font(.body)
             .foregroundStyle(.secondary)
 
-            TextField("Paste the exported cookie JSON here", text: $cookieInput)
+            TextField("Paste a link to your cookie file, or the cookie text itself", text: $cookieInput)
                 .font(.caption.monospaced())
 
             // Diagnostic: confirms whether the paste actually landed in the
