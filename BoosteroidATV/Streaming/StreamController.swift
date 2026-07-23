@@ -45,6 +45,8 @@ final class StreamController: NSObject {
     private var peerConnection: LKRTCPeerConnection?
     private var signaling: BoosteroidSignalingClient?
     private var inputSender: InputSender?
+    private let controlChannel = BoosteroidControlChannel()
+    private var controlChannelTask: Task<Void, Never>?
     private(set) var videoView: VideoSurfaceView?
     private var statsTimer: Timer?
     private var sessionInfo: SessionInfo?
@@ -95,9 +97,48 @@ final class StreamController: NSObject {
 
             try await createPeerConnectionAndOffer(iceServers: iceServers)
             client.startPollingRemoteICE()
+            connectControlChannel(nodeBaseUrl: nodeBaseUrl, session: session)
         } catch {
             state = .failed(message: error.localizedDescription)
         }
+    }
+
+    /// CONFIRMED 2026-07-23: ALL input (keyboard/mouse/controller) rides a
+    /// separate JSON WebSocket, not the WebRTC data channel — see
+    /// BoosteroidControlChannel's header comment for the full protocol. This
+    /// used to be entirely missing: InputSender existed but was never even
+    /// instantiated, so `bindVideoView` was always handing the video view a
+    /// nil input handler.
+    private func connectControlChannel(nodeBaseUrl: String, session: SessionInfo) {
+        guard let queryString = session.queryString else {
+            print("[StreamController] No queryString on SessionInfo — control channel (all input) cannot authenticate. This shouldn't happen once fetchSessionDetails has run; please report this.")
+            return
+        }
+        let (width, height) = Self.parseResolution(settings.resolution)
+        let sender = InputSender(controlChannel: controlChannel, surfaceWidth: width, surfaceHeight: height)
+        inputSender = sender
+        videoView?.inputHandler = sender
+
+        controlChannelTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let stream = await self.controlChannel.connect(
+                nodeBaseUrl: nodeBaseUrl,
+                queryString: queryString,
+                resolutionWidth: width,
+                resolutionHeight: height,
+                refreshRate: self.settings.fps
+            )
+            sender.start()
+            for await event in stream {
+                sender.handleIncoming(event)
+            }
+        }
+    }
+
+    private static func parseResolution(_ resolution: String) -> (Int, Int) {
+        let parts = resolution.split(separator: "x")
+        guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]) else { return (1920, 1080) }
+        return (w, h)
     }
 
     func disconnect() {
@@ -105,6 +146,9 @@ final class StreamController: NSObject {
         statsTimer = nil
         inputSender?.stop()
         inputSender = nil
+        controlChannelTask?.cancel()
+        controlChannelTask = nil
+        Task { [controlChannel] in await controlChannel.disconnect() }
         peerConnection?.close()
         peerConnection = nil
         signaling?.disconnect()
@@ -236,11 +280,12 @@ extension StreamController: LKRTCPeerConnectionDelegate {
     }
 
     nonisolated func peerConnection(_ peerConnection: LKRTCPeerConnection, didOpen dataChannel: LKRTCDataChannel) {
-        // TODO(protocol): unknown whether Boosteroid opens any data channels
-        // for input — the eFootball session played back video/audio and
-        // accepted controller/keyboard input, so SOME input path exists, but
-        // whether it's a WebRTC data channel (vs. a separate mechanism) was
-        // not isolated in this capture pass.
+        // CONFIRMED 2026-07-23: this is NOT the input path. Boosteroid's own
+        // webrtcstreamer.js opens a "ClientDataChannel" here (confirmed from
+        // its source), but a live capture found zero input traffic on it —
+        // ALL keyboard/mouse/controller input actually rides a separate JSON
+        // WebSocket (BoosteroidControlChannel), unrelated to any data
+        // channel. Left as a no-op; nothing observed to be needed here.
     }
 
     nonisolated func peerConnection(_ peerConnection: LKRTCPeerConnection, didChange stateChanged: LKRTCSignalingState) {}

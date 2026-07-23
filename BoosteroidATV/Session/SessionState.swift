@@ -88,14 +88,23 @@ struct BoosteroidUserResponseDTO: Codable {
 // `{userId, nickName, applicationName, applicationId, sessionId,
 // platformUid, merchantId, domain, language, viewers, idleTimeout,
 // reconnectTimeout, hasSubscription, performanceTypes, streamingToken,
-// allowedPlaygrounds}` — informative (confirms e.g. `hasSubscription`/
-// `performanceTypes` reflect the real account's plan) but NOT observed
-// being sent to any of the node's `webrtc/api/*` calls, so it isn't
-// plumbed through anywhere yet.
+// allowedPlaygrounds}` — confirms e.g. `hasSubscription`/`performanceTypes`
+// reflect the real account's plan. CONFIRMED 2026-07-23 (previously
+// documented as "not observed being sent anywhere" — wrong, just not yet
+// found): it's never sent to the `webrtc/api/*` media-signaling calls, but
+// it IS the required auth for the separate control WebSocket that carries
+// all keyboard/mouse/controller input — see BoosteroidControlChannel.
 struct SessionInfo {
     let sessionId: String
     var nodeBaseUrl: String?
     let status: String
+    /// CONFIRMED 2026-07-23 via static analysis of streaming.js: this is
+    /// `session/details`'s `data.queryString` JWT, previously fetched and
+    /// stored but never actually used anywhere. It turns out to be required
+    /// — it's the auth for the control WebSocket that carries ALL input
+    /// (keyboard/mouse/controller), not just informative metadata. See
+    /// BoosteroidControlChannel's header comment for the full protocol.
+    var queryString: String? = nil
 
     var isInQueue: Bool { status == "EN" }
 }

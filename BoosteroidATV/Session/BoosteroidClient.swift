@@ -248,7 +248,9 @@ actor BoosteroidClient {
             // "LI" (presumably "Live") is the CONFIRMED real active-session
             // status string — see the Session Lifecycle note above — so
             // this reuses it rather than inventing a synthetic marker.
-            return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI")
+            // queryString is now actually used — see SessionInfo's doc
+            // comment and BoosteroidControlChannel.
+            return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI", queryString: dto.data.queryString)
         }
         throw BoosteroidClientError.requestFailed("session/details", "Got \(retriesOnEmptyBody + 1) consecutive empty responses (HTTP \(lastEmptyStatus)) — the session may have just been claimed by another device and hasn't settled yet. Try again in a moment.")
     }
