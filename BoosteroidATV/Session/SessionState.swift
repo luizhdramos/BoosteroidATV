@@ -61,21 +61,51 @@ struct ActiveSessionInfo {
 
 // MARK: - Games
 //
-// CONFIRMED: individual game/catalog entries are fetched via
-// GET /api/v1/boostore/applications/{numericId} (e.g. .../applications/836 for
-// eFootball). The dashboard's "Os meus jogos" grid and the hero carousel
-// (GET /api/v1/boostore/carousel?isSub=true) are also real endpoints, but the
-// exact JSON shape of any of these responses wasn't captured — only that they
-// exist, their URLs, and that `id` is a small integer (not a GUID/slug).
-// TODO(protocol): capture one real `applications/{id}` response body to fill
-// in the actual field names (title, box art URL, store/ownership info, launch
-// requirements like "needs a linked Steam account" — seen in the UI as a
-// pre-launch modal).
+// CONFIRMED 2026-07-22 live from a logged-in browser session:
+// GET /api/v1/boostore/applications/installed?page=1&paginate=50 is the
+// "list my library" endpoint (never found in the earlier capture pass, which
+// assumed it might be SSR-embedded instead — it isn't). Standard Laravel
+// pagination envelope: {"data":[...],"links":{...},"meta":{...}}. Each
+// element of `data` has (confirmed field names/types):
+//   id: Int, name: String, icon: String (URL), bannerImage: String (URL),
+//   installed: Bool, genre/tags: arrays, platform/stores: objects,
+//   plus publisher/developer/maintenance/unavailable/monetizeType/controller/
+//   launchLimit/underEula/isOptimized/cardColor/storePromo/createdAt — present
+//   but not yet needed, so not decoded below (Codable ignores unknown keys).
+// GET /api/v1/boostore/applications/{id} (single game) and
+// GET /api/v1/boostore/carousel?isSub=true (hero banner) presumably share
+// this same per-application shape; TODO(protocol) confirm once used.
+struct BoosteroidApplicationDTO: Codable {
+    let id: Int
+    let name: String
+    let icon: String?
+    let bannerImage: String?
+    let installed: Bool
+}
+
+struct BoosteroidPaginatedApplications: Codable {
+    let data: [BoosteroidApplicationDTO]
+}
+
 struct GameInfo: Identifiable, Equatable {
     let id: String
     let title: String
     let boxArtUrl: String?
     var isInLibrary: Bool
+
+    init(id: String, title: String, boxArtUrl: String?, isInLibrary: Bool) {
+        self.id = id
+        self.title = title
+        self.boxArtUrl = boxArtUrl
+        self.isInLibrary = isInLibrary
+    }
+
+    init(_ dto: BoosteroidApplicationDTO) {
+        self.id = String(dto.id)
+        self.title = dto.name
+        self.boxArtUrl = dto.bannerImage ?? dto.icon
+        self.isInLibrary = dto.installed
+    }
 }
 
 // MARK: - Session Create Request

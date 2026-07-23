@@ -248,6 +248,21 @@ final class AuthManager {
         return s.tokens.accessToken
     }
 
+    /// CONFIRMED (live testing): the /api/v1/* JSON API is cookie-session
+    /// authenticated, not bearer-token authenticated (see BoosteroidAuthAPI's
+    /// header comment) — callers hitting those endpoints (BoosteroidClient)
+    /// need the full cookie set, not just resolveToken()'s bearer JWT.
+    func resolveCookies() async throws -> [String: String] {
+        guard var s = session else { throw AuthError.noSession }
+        if s.tokens.isNearExpiry {
+            s = try await refresh(session: s)
+        }
+        guard let cookies = s.tokens.sessionCookies, !cookies.isEmpty else {
+            throw AuthError.noSession
+        }
+        return cookies
+    }
+
     // MARK: Private — Refresh
 
     private func refresh(session s: AuthSession) async throws -> AuthSession {

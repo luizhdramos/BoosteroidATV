@@ -23,9 +23,9 @@ class GamesViewModel {
         isLoading = true
         error = nil
         do {
-            let token = try await authManager.resolveToken()
-            library = try await client.fetchLibrary(token: token)
-            activeSessions = (try? await client.getActiveSessions(token: token)) ?? []
+            let cookies = try await authManager.resolveCookies()
+            library = try await client.fetchLibrary(cookies: cookies)
+            activeSessions = (try? await client.getActiveSessions(token: "")) ?? []
         } catch {
             self.error = error.localizedDescription
         }

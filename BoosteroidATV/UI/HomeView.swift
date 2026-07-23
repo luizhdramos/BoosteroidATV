@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// TODO(protocol): once BoosteroidClient.fetchLibrary actually works, this
-/// should grow the same kind of "Continue Playing" / "Favorites" rows CloudNow
-/// has. Left intentionally simple until we have real data to shape the UI
-/// around.
+/// BoosteroidClient.fetchLibrary is wired up (GET
+/// /api/v1/boostore/applications/installed) as of 2026-07-22.
+/// TODO(protocol): grow the same kind of "Continue Playing" / "Favorites"
+/// rows CloudNow has now that real data is flowing.
 struct HomeView: View {
     let games: [GameInfo]
     let onPlay: (GameInfo) -> Void

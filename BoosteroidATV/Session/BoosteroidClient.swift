@@ -11,31 +11,45 @@ import Foundation
 // reading client JS). Where a body shape is written below, it is inferred and
 // marked TODO(protocol) — treat it as a starting guess, not a fact.
 actor BoosteroidClient {
+    // Ephemeral, cookies sent manually per-request: see BoosteroidAuthAPI for
+    // why (URLSession's shared-cookie-jar auto-merge behavior was the actual
+    // cause of an earlier 414 bug — every request builds its own Cookie
+    // header from the caller-supplied dict instead).
     private let session: URLSession = {
-        let config = URLSessionConfiguration.default
+        let config = URLSessionConfiguration.ephemeral
         config.httpAdditionalHeaders = ["User-Agent": BoosteroidAuth.userAgent]
-        config.httpCookieStorage = HTTPCookieStorage.shared
         return URLSession(configuration: config)
     }()
 
     private let apiBase = "https://cloud.boosteroid.com/api"
 
+    private func authenticatedRequest(_ url: URL, cookies: [String: String]) -> URLRequest {
+        var req = URLRequest(url: url)
+        req.httpShouldHandleCookies = false
+        req.setValue(cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+        req.setValue(BoosteroidAuth.apiBaseUrl, forHTTPHeaderField: "Origin")
+        req.setValue(BoosteroidAuth.apiBaseUrl + "/dashboard", forHTTPHeaderField: "Referer")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        return req
+    }
+
     // MARK: Catalog
     //
-    // CONFIRMED endpoints (URLs + methods only):
+    // CONFIRMED 2026-07-22 live from a logged-in browser session:
+    //   GET /api/v1/boostore/applications/installed?page=1&paginate=50
+    //   — the "my library" list (see SessionState.swift for the confirmed
+    //   response shape). Cookies alone are sufficient (same as /api/v1/user).
     //   GET /api/v1/boostore/carousel?isSub=true   — hero banner carousel
-    //   GET /api/v1/boostore/applications/{id}     — single game detail (id is
-    //                                                 a small integer, e.g. 836)
-    // TODO(protocol): never observed a distinct "list my library" XHR — the
-    // "Os meus jogos" grid was already populated by the time network capture
-    // started, so it's likely embedded in the initial page's SSR/hydration
-    // payload rather than a separate REST call. Confirm by capturing a fresh
-    // page load from the very first request.
+    //   GET /api/v1/boostore/applications/{id}     — single game detail
 
-    func fetchLibrary(token: String) async throws -> [GameInfo] {
-        throw BoosteroidClientError.notImplemented(
-            "fetchLibrary — no distinct library-list endpoint observed yet; only per-app detail (GET /api/v1/boostore/applications/{id}) and the carousel were captured. Capture a cold page load of /dashboard to find it."
-        )
+    func fetchLibrary(cookies: [String: String]) async throws -> [GameInfo] {
+        let url = URL(string: "\(apiBase)/v1/boostore/applications/installed?page=1&paginate=50")!
+        let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw BoosteroidClientError.requestFailed("fetchLibrary", String(data: data, encoding: .utf8) ?? "")
+        }
+        let page = try JSONDecoder().decode(BoosteroidPaginatedApplications.self, from: data)
+        return page.data.map(GameInfo.init)
     }
 
     func fetchApplication(id: String) async throws -> GameInfo {
