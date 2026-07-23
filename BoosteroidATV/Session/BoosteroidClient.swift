@@ -138,6 +138,35 @@ actor BoosteroidClient {
     // you want to show the user a live number while they do.
 
     func createSession(_ request: SessionCreateRequest, cookies: [String: String]) async throws -> SessionInfo {
+        // CONFIRMED 2026-07-22: calling enqueue always creates a BRAND NEW
+        // session, even while a queued ("EN") one already exists for the
+        // same appId — the old one gets orphaned immediately (confirmed:
+        // session/details on it returns 406 "timeout" right away, not after
+        // some idle period). This broke the "start on browser, continue on
+        // the tvOS app" use case: the app's own enqueue call was creating a
+        // SECOND, competing session, surfacing as a confusing "Session
+        // timed out while waiting in queue" error. Fix: if last-session is
+        // already tracking THIS appId and still queued, attach to it
+        // instead of enqueueing again (safe — nobody has "claimed" it yet).
+        //
+        // Deliberately NOT done for an existing "LI" (already active)
+        // session: a same-session re-fetch of session/details was observed
+        // to immediately 406 "timeout" AND the browser tab that had been
+        // streaming it got kicked back to /dashboard — consistent with
+        // fetching details a second time force-ending the first claim, but
+        // this wasn't isolated from ordinary 15-minute-inactivity timeout in
+        // the time available to test, so it's unconfirmed which. Silently
+        // risking killing a session that's actively streaming on another
+        // device isn't an acceptable trade for "maybe" resuming smoothly —
+        // see the explicit error thrown below instead.
+        if let dto = try? await fetchLastSessionDTO(cookies: cookies), dto.data.appId == Int(request.gameId) {
+            if dto.data.status == "EN" {
+                return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
+            }
+            if dto.data.status == "LI" {
+                throw BoosteroidClientError.sessionAlreadyActiveElsewhere
+            }
+        }
         let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -159,13 +188,17 @@ actor BoosteroidClient {
     /// to discover the sessionId right after enqueue and to poll queue
     /// status thereafter (see pollSession).
     private func fetchLastSession(cookies: [String: String]) async throws -> SessionInfo {
+        let dto = try await fetchLastSessionDTO(cookies: cookies)
+        return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
+    }
+
+    private func fetchLastSessionDTO(cookies: [String: String]) async throws -> BoosteroidLastSessionDTO {
         let url = URL(string: "\(apiBase)/v1/streaming/user/last-session")!
         let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw BoosteroidClientError.requestFailed("last-session", String(data: data, encoding: .utf8) ?? "")
         }
-        let dto = try JSONDecoder().decode(BoosteroidLastSessionDTO.self, from: data)
-        return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
+        return try JSONDecoder().decode(BoosteroidLastSessionDTO.self, from: data)
     }
 
     /// Polls the confirmed-working last-session endpoint (see Session
@@ -264,6 +297,11 @@ enum BoosteroidClientError: Error, LocalizedError {
     /// queued/idle. Surfaced distinctly so the UI can show a clear
     /// "try again" message instead of a raw error body.
     case sessionTimedOut
+    /// Thrown instead of silently trying to attach to (and risk killing) a
+    /// session that's already live for the same game — see createSession's
+    /// comment for why a second session/details fetch on an already-active
+    /// session looked dangerous.
+    case sessionAlreadyActiveElsewhere
 
     var errorDescription: String? {
         switch self {
@@ -273,6 +311,8 @@ enum BoosteroidClientError: Error, LocalizedError {
             return "\(name) failed: \(body)"
         case .sessionTimedOut:
             return "Session timed out while waiting in queue. Please try again."
+        case .sessionAlreadyActiveElsewhere:
+            return "This game is already being streamed on another device. Close it there first, then try again here."
         }
     }
 }

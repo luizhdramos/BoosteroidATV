@@ -269,13 +269,29 @@ final class AuthManager {
     /// id>&token=<raw JWT>` — the *raw* access token, without the "Bearer "
     /// prefix `resolveToken()`/`AuthTokens.accessToken` carries (that prefix
     /// is only meaningful for an HTTP Authorization header).
+    ///
+    /// BUG FIXED 2026-07-22: any session created BEFORE `completeLogin`
+    /// learned to decode GET /api/v1/user's real body (i.e. anyone who
+    /// logged in and never logged out again) has `user.userId == "unknown"`
+    /// persisted in Keychain forever — this silently broke the queue-
+    /// position WebSocket (no visible error; StreamView just never showed a
+    /// number) because `guard s.user.userId != "unknown"` used to just
+    /// throw here. Now it backfills the real id via
+    /// `BoosteroidClient.fetchCurrentUser` on demand and persists it, so
+    /// existing installs self-heal without needing a fresh login.
     func resolveRealtimeCredentials() async throws -> (userId: String, token: String) {
         guard var s = session else { throw AuthError.noSession }
         if s.tokens.isNearExpiry {
             s = try await refresh(session: s)
         }
-        guard s.user.userId != "unknown" else {
-            throw AuthError.noSession
+        if s.user.userId == "unknown" {
+            guard let cookies = s.tokens.sessionCookies, !cookies.isEmpty else {
+                throw AuthError.noSession
+            }
+            let user = try await BoosteroidClient().fetchCurrentUser(cookies: cookies)
+            s.user = user
+            session = s
+            try? persist(s)
         }
         var token = s.tokens.accessToken
         if token.hasPrefix("Bearer ") {
