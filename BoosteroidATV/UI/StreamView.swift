@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// TODO(protocol): this drives StreamController against BoosteroidClient, both
-/// of which currently throw BoosteroidClientError.notImplemented / do nothing
-/// useful yet. The UI shell (loading state, error state, video surface, basic
-/// pause overlay) is here so the rest of the app can be wired up and tested as
-/// soon as the real session-creation and signaling calls exist.
+/// Drives StreamController against BoosteroidClient's CONFIRMED,
+/// end-to-end-verified session lifecycle (enqueue -> poll last-session ->
+/// session/details -> WebRTC signaling — see BoosteroidClient.swift's
+/// Session Lifecycle note; verified 2026-07-22 against a real, genuinely
+/// playable PRAGMATA session). Also drives BoosteroidRealtimeClient
+/// separately, purely to show a live numeric queue position while waiting.
 struct StreamView: View {
     let game: GameInfo
     let settings: StreamSettings
@@ -17,6 +18,9 @@ struct StreamView: View {
     @State private var queueAttempt = 0
     @State private var queueStatus = ""
     @State private var queueStartedAt = Date()
+    @State private var queuePosition: Int?
+    @State private var queueEta: Int?
+    @State private var realtimeClient = BoosteroidRealtimeClient()
 
     var body: some View {
         ZStack {
@@ -31,22 +35,24 @@ struct StreamView: View {
                         ProgressView().scaleEffect(2).tint(.white)
                         Text("Connecting to \(game.title)...")
                             .foregroundStyle(.white)
-                        // Boosteroid's confirmed last-session API has no
-                        // numeric queue-position field (the web UI's
-                        // "Posição na fila" is pushed over a WebSocket this
-                        // app can't capture) — so this is the most honest
-                        // status we can show: still queued, how long, and a
-                        // way out instead of a silent spinner.
-                        if queueAttempt > 0 {
+                        // last-session (polled by createAndAwaitSession) is
+                        // the CONFIRMED authoritative "are we still queued"
+                        // signal (EN -> LI), but has no numeric position.
+                        // BoosteroidRealtimeClient's WebSocket feed supplies
+                        // that number separately when available — CONFIRMED
+                        // real-world behavior: queue position can rise as
+                        // well as fall (higher-tier accounts join ahead),
+                        // even on a paid account, so this can take a while.
+                        if queueAttempt > 0 || queuePosition != nil {
                             VStack(spacing: 8) {
-                                Text("Still in queue (status: \(queueStatus)) — waited \(Int(Date().timeIntervalSince(queueStartedAt)))s")
+                                if let queuePosition {
+                                    Text("Queue position: \(queuePosition)" + (queueEta.map { " — ~\($0)s" } ?? ""))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white)
+                                }
+                                Text("Status: \(queueStatus.isEmpty ? "waiting" : queueStatus) — waited \(Int(Date().timeIntervalSince(queueStartedAt)))s")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text("Boosteroid's free-tier queue position can rise as paying-tier users join — this can take a while or may not clear at all.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 120)
                             }
                         }
                         Button("Cancel") { onDismiss() }
@@ -103,15 +109,25 @@ struct StreamView: View {
 
     private func start() async {
         queueStartedAt = Date()
+        // Best-effort: the numeric queue position only comes from
+        // BoosteroidRealtimeClient's WebSocket feed, which is a "nice to
+        // have" — the actual queue -> active detection below relies solely
+        // on the CONFIRMED-reliable last-session polling and doesn't depend
+        // on this succeeding.
+        let realtimeTask = Task { await watchQueuePosition() }
+        defer {
+            realtimeTask.cancel()
+            Task { await realtimeClient.disconnect() }
+        }
         do {
             let cookies = try await authManager.resolveCookies()
             let client = BoosteroidClient()
-            // createAndAwaitSession enqueues, polls the confirmed
-            // last-session endpoint until the queue clears (or 180s
-            // elapses), then fetches session/details. TODO(protocol):
-            // session/details' success body (nodeBaseUrl) still isn't
-            // captured, so this currently throws .notImplemented right at
-            // the point queue wait finishes — see BoosteroidClient.swift.
+            // createAndAwaitSession enqueues, then polls the CONFIRMED
+            // last-session endpoint (EN = queued, LI = active) until ready
+            // or 180s elapses, then fetches session/details for the real
+            // node host — see BoosteroidClient.swift's Session Lifecycle
+            // note for how this was verified end-to-end against a real,
+            // genuinely-playable session.
             let session = try await client.createAndAwaitSession(
                 SessionCreateRequest(gameId: game.id, settings: settings),
                 cookies: cookies,
@@ -123,6 +139,27 @@ struct StreamView: View {
             await controller.connect(session: session, settings: settings)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Connects to Boosteroid's real-time WebSocket (see
+    /// BoosteroidRealtimeClient) purely to surface a live numeric queue
+    /// position/eta in the UI. Failure here is silent by design — this is
+    /// cosmetic, not load-bearing; `start()`'s last-session polling is what
+    /// actually decides when to proceed.
+    private func watchQueuePosition() async {
+        guard let (userId, token) = try? await authManager.resolveRealtimeCredentials() else { return }
+        guard let targetAppId = Int(game.id) else { return }
+        for await event in await realtimeClient.connect(userId: userId, token: token) {
+            if Task.isCancelled { break }
+            switch event {
+            case .queueUpdate(let appId, let position, let eta):
+                guard appId == targetAppId else { continue }
+                queuePosition = position
+                queueEta = eta
+            case .raw, .closed, .failed:
+                continue
+            }
         }
     }
 }

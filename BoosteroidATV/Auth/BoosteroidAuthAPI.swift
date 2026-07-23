@@ -98,16 +98,23 @@ actor BoosteroidAuthAPI {
                 Response body: \(bodyPreview)
                 """)
         }
-        // TODO(protocol): replace with a real call to whatever endpoint returns the
-        // logged-in user's profile (id, display name, email, plan/tier) — GET
-        // /api/v1/user's response body shape is still unconfirmed.
-        let user = AuthUser(
-            userId: "unknown",
-            displayName: "Boosteroid User",
-            email: nil,
-            avatarUrl: nil,
-            membershipTier: "unknown"
-        )
+        // CONFIRMED 2026-07-22 live: GET /api/v1/user's body shape is
+        // {"data":{"id":<int>,"name":...,"email":...,"avatar":...,...}}.
+        // `id` matters beyond just display — it's the numeric `uid` the real
+        // web client sends as a WebSocket query param when connecting to
+        // wss://cloud.boosteroid.com/ws (see BoosteroidRealtimeClient).
+        let user: AuthUser
+        if let dto = try? JSONDecoder().decode(BoosteroidUserResponseDTO.self, from: data) {
+            user = AuthUser(
+                userId: String(dto.data.id),
+                displayName: dto.data.name,
+                email: dto.data.email,
+                avatarUrl: dto.data.avatar,
+                membershipTier: "unknown"
+            )
+        } else {
+            user = AuthUser(userId: "unknown", displayName: "Boosteroid User", email: nil, avatarUrl: nil, membershipTier: "unknown")
+        }
         let tokens = AuthTokens(
             accessToken: bearerToken ?? "",
             refreshToken: nil,

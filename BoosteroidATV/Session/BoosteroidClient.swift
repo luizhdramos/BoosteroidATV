@@ -75,43 +75,67 @@ actor BoosteroidClient {
 
     // MARK: Current User
     //
-    // CONFIRMED: GET /api/v1/user returns 200 for an authenticated (cookie)
-    // session — good liveness/validation check for AuthManager, but response
-    // body shape unconfirmed.
+    // CONFIRMED 2026-07-22: GET /api/v1/user → 200 for an authenticated
+    // (cookie) session, body {"data":{"id":<int>,"name":...,"email":...,
+    // "avatar":...,...}}. `id` is also what BoosteroidAuthAPI.completeLogin
+    // stores as AuthUser.userId (needed as the WebSocket's `uid` param — see
+    // BoosteroidRealtimeClient) and what AuthManager.resolveRealtimeCredentials
+    // returns.
 
-    func fetchCurrentUser(cookies: [String: String]) async throws {
+    func fetchCurrentUser(cookies: [String: String]) async throws -> AuthUser {
         let url = URL(string: "\(apiBase)/v1/user")!
         let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw BoosteroidClientError.requestFailed("fetchCurrentUser", String(data: data, encoding: .utf8) ?? "")
         }
-        // TODO(protocol): decode into AuthUser once the body shape is known.
+        let dto = try JSONDecoder().decode(BoosteroidUserResponseDTO.self, from: data)
+        return AuthUser(userId: String(dto.data.id), displayName: dto.data.name, email: dto.data.email, avatarUrl: dto.data.avatar, membershipTier: "unknown")
     }
 
     // MARK: Session Lifecycle
     //
-    // CONFIRMED flow, real endpoints and bodies, in order:
+    // CONFIRMED flow, real endpoints/bodies, END TO END — this was verified
+    // by actually watching a real (paying-tier) account's queue drain from
+    // ~53 to 0 over a few minutes and PRAGMATA become genuinely playable:
     //   1. POST /api/v2/streaming/session/enqueue  body: {"appId": <int>}
     //      → 204, no response body (starts the queue).
     //   2. GET /api/v1/streaming/user/last-session → 200
     //      {"data":{"sessionId":"<uuid>","appId":<int>,"status":"EN"}}
-    //      — this, not enqueue's response, is where the sessionId comes from.
-    //      Queue position is shown live in the UI with NO visible REST
-    //      polling for it — two separate WebSocket-constructor capture
-    //      passes caught zero connections despite the on-screen position
-    //      visibly updating, which strongly suggests Boosteroid opens one
-    //      long-lived WS/SSE connection at app-shell load time (before this
-    //      kind of page-context script injection could ever patch it), not
-    //      per-queue. Polling last-session is the pragmatic, confirmed-
-    //      working substitute used below.
+    //      while queued, flipping to `"status":"LI"` (CONFIRMED — "Live",
+    //      presumably) once the session is genuinely active. This is where
+    //      the sessionId comes from — enqueue's own response never carries
+    //      one. NOTE: an EARLIER pass through this investigation saw
+    //      last-session apparently "stuck" returning a stale, already
+    //      timed-out session's data (appId 836) no matter how many fresh
+    //      enqueue calls were made for a different app. That turned out to
+    //      be specific to that one leftover session (probably orphaned by
+    //      test enqueue/cancel calls made directly via fetch(), bypassing
+    //      whatever the real "leave queue" UI flow does) — once a session
+    //      genuinely went active, last-session correctly reflected it. This
+    //      endpoint is reliable; don't reintroduce the WebSocket-based
+    //      redesign that was drafted while this looked like a dead end.
     //   3. Once ready, the UI navigates to
     //      cloud.boosteroid.com/static/streaming/streaming.html?sessionId={uuid}
     //      which calls POST /api/v1/streaming/session/details?sessionId=...
-    //      (CONFIRMED POST-only; GET → 405). TODO(protocol): its SUCCESS body
-    //      (should carry nodeBaseUrl) was never captured — every session
-    //      observed in this investigation pass either sat in a climbing
-    //      queue or had already timed out (confirmed 406 error shape, see
-    //      BoosteroidSessionDetailsErrorDTO) before reaching active.
+    //      (CONFIRMED POST-only; GET → 405), whose CONFIRMED success body is
+    //      {"data":{"gw":"https://sp7.cloud.boosteroid.com:443",
+    //      "queryString":"<jwt>"}} — `gw` is exactly SessionInfo.nodeBaseUrl,
+    //      confirmed by watching the real client's subsequent getIceServers/
+    //      getParams/call/addIceCandidate/getIceCandidate calls land on
+    //      exactly that host, matching SignalingClient.swift's existing URL
+    //      patterns byte-for-byte. For an expired/idle session this instead
+    //      returns HTTP 406 with a `{"data":{"code":"timeout",...}}` body
+    //      (see BoosteroidSessionDetailsErrorDTO / .sessionTimedOut).
+    //
+    // Separately, real-time queue-POSITION push (the numeric "Posição na
+    // fila" the web UI shows) was confirmed via static analysis of
+    // Boosteroid's own Angular bundle (two live WebSocket-constructor
+    // capture passes caught nothing — the connection opens app-wide, right
+    // after login, before any page-script patch can run) to be a generic
+    // WebSocket at wss://cloud.boosteroid.com/ws?uid=<id>&token=<jwt>,
+    // separate from last-session entirely — see BoosteroidRealtimeClient.
+    // last-session tells you WHEN to stop waiting; the WS is only needed if
+    // you want to show the user a live number while they do.
 
     func createSession(_ request: SessionCreateRequest, cookies: [String: String]) async throws -> SessionInfo {
         let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
@@ -151,10 +175,8 @@ actor BoosteroidClient {
         try await fetchLastSession(cookies: cookies)
     }
 
-    /// CONFIRMED URL/method/error-shape — see the Session Lifecycle note
-    /// above. TODO(protocol): the success body (should carry nodeBaseUrl)
-    /// still isn't confirmed, so a successful 200 here still throws
-    /// .notImplemented, isolated to exactly this one spot.
+    /// CONFIRMED URL/method/error-shape/success-shape — see the Session
+    /// Lifecycle note above and SessionInfo's doc comment.
     func fetchSessionDetails(sessionId: String, cookies: [String: String]) async throws -> SessionInfo {
         let url = URL(string: "\(apiBase)/v1/streaming/session/details?sessionId=\(sessionId)")!
         let req = authenticatedRequest(url, cookies: cookies, method: "POST")
@@ -168,26 +190,23 @@ actor BoosteroidClient {
         guard status == 200 else {
             throw BoosteroidClientError.requestFailed("session/details", String(data: data, encoding: .utf8) ?? "")
         }
-        throw BoosteroidClientError.notImplemented(
-            "session/details returned 200, but its success body shape (needed for SessionInfo.nodeBaseUrl) has never actually been captured — decode it here once a live session reaches active status."
-        )
+        let dto = try JSONDecoder().decode(BoosteroidSessionDetailsSuccessDTO.self, from: data)
+        // "LI" (presumably "Live") is the CONFIRMED real active-session status
+        // string — see the Session Lifecycle note above — so this reuses it
+        // rather than inventing a synthetic marker.
+        return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI")
     }
 
     /// Orchestrates the full queue → active flow: enqueue, poll last-session
-    /// until status moves away from "EN" (queued) or the timeout elapses,
-    /// then fetch session details. TODO(protocol): the real "active/ready"
-    /// status string is unconfirmed (see Session Lifecycle note) — this
-    /// treats ANY status other than "EN" as "try session/details now", which
-    /// will surface a clear error rather than hang silently if that guess is
-    /// ever wrong. Mirrors CloudNow's GFN queue flow (poll indefinitely, 180s
-    /// setup timeout) per this project's own conventions.
+    /// until status moves from "EN" (queued) to "LI" (active — both CONFIRMED
+    /// real values, see Session Lifecycle note) or the timeout elapses, then
+    /// fetch session details. Mirrors CloudNow's GFN queue flow (poll
+    /// indefinitely, 180s setup timeout) per this project's own conventions.
     /// `onPoll` fires once right after enqueue (attempt 0) and again after
-    /// every subsequent poll, so callers can show *something* better than a
-    /// silent spinner — the confirmed last-session shape has no numeric
-    /// queue-position field (that's only shown in the web UI, pushed over
-    /// the WebSocket this app can't capture — see Session lifecycle note),
-    /// so all we can surface is the raw status string and how long we've
-    /// been waiting.
+    /// every subsequent poll — last-session has no numeric queue-position
+    /// field (that's only in the WebSocket push, see BoosteroidRealtimeClient
+    /// — StreamView drives the live position display from that separately),
+    /// so this callback's `status` is what's actually available here.
     func createAndAwaitSession(
         _ request: SessionCreateRequest,
         cookies: [String: String],
@@ -206,7 +225,7 @@ actor BoosteroidClient {
             await onPoll?(current, attempt)
         }
         guard current.status != "EN" else {
-            throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Queue wait exceeded \(Int(timeoutSeconds))s — Boosteroid's free-tier queue position can climb as paying-tier users cut ahead, so this can happen even after a long wait. Try again later.")
+            throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Queue wait exceeded \(Int(timeoutSeconds))s — queue position can rise as well as fall (even on a paid account — higher-priority sessions can still land ahead of you), so this can happen even after a long wait. Try again.")
         }
         return try await fetchSessionDetails(sessionId: current.sessionId, cookies: cookies)
     }
@@ -223,13 +242,17 @@ actor BoosteroidClient {
         return [ActiveSessionInfo(sessionId: dto.data.sessionId, status: dto.data.status, gameId: String(dto.data.appId))]
     }
 
-    /// TODO(protocol): no `/webrtc/api/hangup`-style call was observed when
-    /// ending a real session via the UI's "End Session" → confirm flow — the
-    /// fetch-level capture used here didn't catch it, so it may go out over
-    /// XHR, `navigator.sendBeacon`, or the same unconfirmed WebSocket used for
-    /// queue updates. Needs a dedicated capture pass.
+    /// TODO(protocol): no teardown REST call was observed when ending a real
+    /// session via the UI's "End Session" → "End session" confirm flow — this
+    /// time checked at the CDP network-request level (not just page-script
+    /// patches, which are known-unreliable here — see BoosteroidRealtimeClient),
+    /// so its absence is a stronger signal: teardown most likely goes out over
+    /// the same WebSocket used for queue-position push. Note also that
+    /// last-session did NOT immediately reflect the ended state (still showed
+    /// "LI" right after confirming "End Session") — don't rely on it to
+    /// detect that a session you ended yourself has actually stopped.
     func stopSession(sessionId: String, cookies: [String: String]) async throws {
-        throw BoosteroidClientError.notImplemented("stopSession — teardown call not isolated in the capture yet")
+        throw BoosteroidClientError.notImplemented("stopSession — no REST teardown call found; likely goes out over the WebSocket used for queue updates (see BoosteroidRealtimeClient) — unconfirmed message shape")
     }
 }
 

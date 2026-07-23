@@ -31,20 +31,41 @@ struct IceServer: Codable {
     let credential: String?
 }
 
+// MARK: - Current User
+//
+// CONFIRMED 2026-07-22 live: GET /api/v1/user's success body is
+// {"data":{"id":<int>,"name":...,"email":...,"avatar":...,...}} (plus other
+// unused-so-far fields — emailVerifiedAt, firstName/lastName, isActive,
+// isBlocked, languageCode, socialAuths, ...). `id` matters beyond display:
+// it's the numeric `uid` the real web client sends when connecting to
+// wss://cloud.boosteroid.com/ws — see BoosteroidRealtimeClient and
+// AuthManager.resolveRealtimeCredentials. Shared between BoosteroidAuthAPI
+// (login) and BoosteroidClient (fetchCurrentUser) since both need it.
+struct BoosteroidUserResponseDTO: Codable {
+    struct Payload: Codable {
+        let id: Int
+        let name: String
+        let email: String?
+        let avatar: String?
+    }
+    let data: Payload
+}
+
 // MARK: - Session Info
 //
-// CONFIRMED 2026-07-22 live (fetch-patch finally caught real traffic on a
-// second capture pass, after the first two attempts on the enqueue call came
-// back empty): `GET /api/v1/streaming/user/last-session` returns
+// CONFIRMED 2026-07-22 live end-to-end: `GET /api/v1/streaming/user/
+// last-session` returns
 //   {"data":{"sessionId":"<uuid>","appId":<int>,"status":"EN"}}
-// "EN" was observed for a session sitting in queue. TODO(protocol): the
-// status value once a session goes live was NOT captured — the only queue
-// watched in this pass sat at position ~52-55 the whole time (Boosteroid's
-// free-tier queue position can climb, not just fall, as paying-tier users
-// cut ahead) and a separate stale session from an earlier capture pass had
-// already timed out server-side by the time it was checked again. Treat
-// "EN" as "still queued" and any other status as "worth trying
-// session/details".
+// while queued, and status flips to `"LI"` ("Live", presumably) once the
+// session is genuinely active — verified by watching a real, paying-tier
+// account's queue drain and PRAGMATA actually become playable. (An earlier
+// pass through this investigation saw last-session apparently "stuck" on a
+// stale, already-expired session no matter how many fresh enqueue calls
+// were made — that turned out to be specific to one leftover session, not a
+// general reliability problem with this endpoint; see BoosteroidClient's
+// Session Lifecycle note for the full story.) Queue POSITION (the number
+// the web UI shows) is a separate concept, pushed over a WebSocket — see
+// BoosteroidRealtimeClient — not present on last-session at all.
 //
 // CONFIRMED: `POST /api/v1/streaming/session/details?sessionId=...` is
 // POST-only (a GET returns 405 with a body naming POST as the only
@@ -52,11 +73,25 @@ struct IceServer: Codable {
 // with:
 //   {"data":{"title":"TIMEOUT!","message":"Session has been ended by
 //   timeout","icon":"cry","code":"timeout"}}
-// TODO(protocol): the SUCCESS body (which should carry `nodeBaseUrl`, e.g.
-// "https://sp0.cloud.boosteroid.com" — confirmed as a real per-node host
-// from the earlier eFootball capture, just not re-confirmed as THIS
-// endpoint's field) was not captured — no session in this pass reached
-// "active" before timing out.
+//
+// CONFIRMED 2026-07-22, second pass, against a genuinely active PRAGMATA
+// session that made it all the way through a real (if slow — a paying
+// account's queue drained ~53 -> 0 over a few minutes) queue: the SUCCESS
+// body is
+//   {"data":{"gw":"https://sp7.cloud.boosteroid.com:443",
+//            "queryString":"<JWT>"}}
+// `gw` is exactly `SessionInfo.nodeBaseUrl` — confirmed by then watching
+// the real client make its `getIceServers`/`getParams`/`call`/
+// `addIceCandidate`/`getIceCandidate` calls against that exact host,
+// matching SignalingClient.swift's existing (already-correct) URL
+// patterns byte-for-byte. `queryString` is a JWT whose payload decodes to
+// `{userId, nickName, applicationName, applicationId, sessionId,
+// platformUid, merchantId, domain, language, viewers, idleTimeout,
+// reconnectTimeout, hasSubscription, performanceTypes, streamingToken,
+// allowedPlaygrounds}` — informative (confirms e.g. `hasSubscription`/
+// `performanceTypes` reflect the real account's plan) but NOT observed
+// being sent to any of the node's `webrtc/api/*` calls, so it isn't
+// plumbed through anywhere yet.
 struct SessionInfo {
     let sessionId: String
     var nodeBaseUrl: String?
@@ -72,6 +107,16 @@ struct BoosteroidLastSessionDTO: Codable {
         let sessionId: String
         let appId: Int
         let status: String
+    }
+    let data: Payload
+}
+
+/// CONFIRMED shape of `POST /api/v1/streaming/session/details`'s SUCCESS
+/// body (HTTP 200) — see SessionInfo doc comment above.
+struct BoosteroidSessionDetailsSuccessDTO: Codable {
+    struct Payload: Codable {
+        let gw: String
+        let queryString: String?
     }
     let data: Payload
 }

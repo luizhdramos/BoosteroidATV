@@ -263,6 +263,27 @@ final class AuthManager {
         return cookies
     }
 
+    /// CONFIRMED 2026-07-22 via static analysis of Boosteroid's own bundle:
+    /// the real-time WebSocket at wss://cloud.boosteroid.com/ws (see
+    /// BoosteroidRealtimeClient) authenticates via `?uid=<numeric user
+    /// id>&token=<raw JWT>` — the *raw* access token, without the "Bearer "
+    /// prefix `resolveToken()`/`AuthTokens.accessToken` carries (that prefix
+    /// is only meaningful for an HTTP Authorization header).
+    func resolveRealtimeCredentials() async throws -> (userId: String, token: String) {
+        guard var s = session else { throw AuthError.noSession }
+        if s.tokens.isNearExpiry {
+            s = try await refresh(session: s)
+        }
+        guard s.user.userId != "unknown" else {
+            throw AuthError.noSession
+        }
+        var token = s.tokens.accessToken
+        if token.hasPrefix("Bearer ") {
+            token = String(token.dropFirst("Bearer ".count))
+        }
+        return (s.user.userId, token)
+    }
+
     // MARK: Private — Refresh
 
     private func refresh(session s: AuthSession) async throws -> AuthSession {
