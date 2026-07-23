@@ -137,31 +137,36 @@ final class BoosteroidSignalingClient {
     }
 
     func fetchIceServers() async throws -> [IceServer] {
-        let (data, response) = try await session.data(for: authenticatedRequest(url("getIceServers")))
-        try Self.throwIfEmptyOrNonJSON(data: data, response: response, endpoint: "getIceServers")
+        let data = try await getWithRetryOnEmptyBody(path: "getIceServers")
         let decoded = try JSONDecoder().decode(IceServersResponse.self, from: data)
         return decoded.iceServers
     }
 
     func fetchParams() async throws -> StreamParams {
-        let (data, response) = try await session.data(for: authenticatedRequest(url("getParams")))
-        try Self.throwIfEmptyOrNonJSON(data: data, response: response, endpoint: "getParams")
+        let data = try await getWithRetryOnEmptyBody(path: "getParams")
         return try JSONDecoder().decode(StreamParams.self, from: data)
     }
 
-    /// Surfaces a clear, actionable error instead of letting `JSONDecoder`
-    /// fail with its generic (and, out of context, confusing) "the data
-    /// couldn't be read because it is missing" message — which is exactly
-    /// what decoding zero-byte Data throws. A reported crash matching that
-    /// message right as the game loads is what prompted adding cookies to
-    /// every request in this file in the first place (see the init's doc
-    /// comment) — this check makes any *remaining* auth/empty-body problem
-    /// self-explanatory instead of a cryptic Foundation error string.
-    private static func throwIfEmptyOrNonJSON(data: Data, response: URLResponse, endpoint: String) throws {
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard !data.isEmpty else {
-            throw SignalingError.callFailed("\(endpoint) returned an empty body (HTTP \(status)) — likely an auth/session problem talking to the streaming node, not a real ICE/params response.")
+    /// CONFIRMED 2026-07-22 (real device report): `session/details` on the
+    /// main API can return HTTP 200 with an EMPTY body right after a
+    /// different client just claimed the session, and a manual retry a few
+    /// seconds later succeeds — see BoosteroidClient.fetchSessionDetails'
+    /// doc comment for the full story. `getIceServers`/`getParams` here hit
+    /// the SAME just-claimed session moments later in the connect flow, so
+    /// they get the same transient-empty-body retry treatment rather than
+    /// failing immediately with Foundation's generic "the data couldn't be
+    /// read because it is missing" decode error.
+    private func getWithRetryOnEmptyBody(path: String, retries: Int = 3) async throws -> Data {
+        var lastStatus = 0
+        for attempt in 0...retries {
+            let (data, response) = try await session.data(for: authenticatedRequest(url(path)))
+            if !data.isEmpty { return data }
+            lastStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if attempt < retries {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
         }
+        throw SignalingError.callFailed("\(path) returned an empty body \(retries + 1) times in a row (HTTP \(lastStatus)) — possibly still settling after another device claimed this session, or an auth/session problem talking to the streaming node.")
     }
 
     // MARK: Send Offer / Receive Answer

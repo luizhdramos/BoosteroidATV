@@ -209,24 +209,48 @@ actor BoosteroidClient {
 
     /// CONFIRMED URL/method/error-shape/success-shape — see the Session
     /// Lifecycle note above and SessionInfo's doc comment.
-    func fetchSessionDetails(sessionId: String, cookies: [String: String]) async throws -> SessionInfo {
+    ///
+    /// CONFIRMED 2026-07-22 (real device report): calling this RIGHT after
+    /// another client (e.g. a browser) just claimed the same session can
+    /// return HTTP 200 with an EMPTY body instead of the real JSON — this
+    /// was surfacing as Swift's generic "the data couldn't be read because
+    /// it is missing" decode error (exactly what JSONDecoder throws on
+    /// zero-byte Data). A user retrying manually a few seconds later (close
+    /// app, reopen) succeeded, which points at this being a transient
+    /// eventual-consistency race on Boosteroid's backend right at the
+    /// moment of claim, not a hard "second call always fails" rule — so
+    /// this retries a couple of times on an empty 200 body before giving up,
+    /// instead of making the user retry by hand.
+    func fetchSessionDetails(sessionId: String, cookies: [String: String], retriesOnEmptyBody: Int = 3) async throws -> SessionInfo {
         let url = URL(string: "\(apiBase)/v1/streaming/session/details?sessionId=\(sessionId)")!
-        let req = authenticatedRequest(url, cookies: cookies, method: "POST")
-        let (data, response) = try await session.data(for: req)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 406,
-           let err = try? JSONDecoder().decode(BoosteroidSessionDetailsErrorDTO.self, from: data),
-           err.data.code == "timeout" {
-            throw BoosteroidClientError.sessionTimedOut
+        var lastEmptyStatus = 0
+        for attempt in 0...retriesOnEmptyBody {
+            let req = authenticatedRequest(url, cookies: cookies, method: "POST")
+            let (data, response) = try await session.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if status == 406,
+               let err = try? JSONDecoder().decode(BoosteroidSessionDetailsErrorDTO.self, from: data),
+               err.data.code == "timeout" {
+                throw BoosteroidClientError.sessionTimedOut
+            }
+            guard status == 200 else {
+                throw BoosteroidClientError.requestFailed("session/details", String(data: data, encoding: .utf8) ?? "")
+            }
+            guard !data.isEmpty else {
+                lastEmptyStatus = status
+                if attempt < retriesOnEmptyBody {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    continue
+                }
+                break
+            }
+            let dto = try JSONDecoder().decode(BoosteroidSessionDetailsSuccessDTO.self, from: data)
+            // "LI" (presumably "Live") is the CONFIRMED real active-session
+            // status string — see the Session Lifecycle note above — so
+            // this reuses it rather than inventing a synthetic marker.
+            return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI")
         }
-        guard status == 200 else {
-            throw BoosteroidClientError.requestFailed("session/details", String(data: data, encoding: .utf8) ?? "")
-        }
-        let dto = try JSONDecoder().decode(BoosteroidSessionDetailsSuccessDTO.self, from: data)
-        // "LI" (presumably "Live") is the CONFIRMED real active-session status
-        // string — see the Session Lifecycle note above — so this reuses it
-        // rather than inventing a synthetic marker.
-        return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI")
+        throw BoosteroidClientError.requestFailed("session/details", "Got \(retriesOnEmptyBody + 1) consecutive empty responses (HTTP \(lastEmptyStatus)) — the session may have just been claimed by another device and hasn't settled yet. Try again in a moment.")
     }
 
     /// Orchestrates the full queue → active flow: enqueue, poll last-session
