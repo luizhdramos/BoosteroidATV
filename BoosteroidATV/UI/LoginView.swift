@@ -77,6 +77,14 @@ struct LoginView: View {
             TextField("Paste the exported cookie JSON here", text: $cookieInput)
                 .font(.caption.monospaced())
 
+            // Diagnostic: confirms whether the paste actually landed in the
+            // field at all/in full, independent of whether it later parses —
+            // tvOS's remote-driven text input has been unreliable with very
+            // long pasted values in earlier testing.
+            Text("\(cookieInput.count) characters entered")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             HStack(spacing: 24) {
                 Button("Sign In") { authManager.submitCookieHeader(cookieInput) }
                     .buttonStyle(.bordered)
