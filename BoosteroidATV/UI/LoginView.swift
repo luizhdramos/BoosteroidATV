@@ -72,8 +72,8 @@ struct LoginView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 instructionRow(number: 1, text: "On your phone or computer, open \(BoosteroidAuth.loginStartUrl) and log in.")
-                instructionRow(number: 2, text: "Install the free \"Cookie-Editor\" browser extension, open it on cloud.boosteroid.com, and use Export → JSON — save it as a file.")
-                instructionRow(number: 3, text: "Recommended: put that file in iCloud Drive (or a Gist/paste.ee), get a share link, and paste just the LINK below — typing/pasting the full cookie text directly on the Apple TV has been unreliable for long values.")
+                instructionRow(number: 2, text: "Install the free \"Cookie-Editor\" browser extension, open it on cloud.boosteroid.com, and use Export → JSON.")
+                instructionRow(number: 3, text: "Recommended: paste that JSON into a new GitHub Gist (gist.github.com — can be secret), click the file's \"Raw\" button, and paste that Raw URL below. (iCloud Drive/Dropbox share links don't work here — they return a web page, not the raw file.)")
                 instructionRow(number: 4, text: "Select Sign In.")
             }
             .font(.body)

@@ -137,6 +137,18 @@ actor BoosteroidAuthAPI {
         guard let text = String(data: data, encoding: .utf8) else {
             throw AuthError.loginFailed("That link didn't return readable text.")
         }
+        // Share-page links (iCloud Drive's "Copy Link", Dropbox's default
+        // share link, etc.) often resolve to an HTML wrapper page that needs
+        // JavaScript to actually load the file, not the file's raw content —
+        // confirmed with an iCloud Drive link returning icloud.com's page
+        // shell instead of the pasted JSON. Catch that early with a clear
+        // message instead of a confusing "no cookies found" a step later.
+        let looksLikeHTML = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("<!doctype") || text.contains("<html")
+        guard !looksLikeHTML else {
+            throw AuthError.loginFailed("That link returned a web page instead of your file's raw content (common with iCloud Drive/Dropbox share links, which need a browser to load). Use a direct/raw link instead — e.g. a GitHub Gist's 'Raw' button URL, or paste.ee.")
+        }
         return text
     }
 
