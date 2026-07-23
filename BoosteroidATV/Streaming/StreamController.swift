@@ -61,6 +61,16 @@ final class StreamController: NSObject {
 
     // MARK: Connect
 
+    // CONFIRMED 2026-07-23 (see BoosteroidControlChannel's header for the full
+    // evidence): the control WebSocket is the PRIMARY connection. Opening it
+    // claims the session for this device, and the server only starts feeding
+    // WebRTC media after the client has claimed via that socket AND received a
+    // `settings/webrtc` signal on it. So this now opens the control socket
+    // FIRST and defers all WebRTC signaling until that signal arrives — the
+    // exact order the web client uses. The previous WebRTC-first ordering is
+    // why the app only ever showed video when a browser had already claimed
+    // the session, and why opening the control socket after WebRTC (a first
+    // buggy pass) black-screened everything.
     func connect(session: SessionInfo, settings: StreamSettings, cookies: [String: String]) async {
         switch state {
         case .connecting, .streaming: return
@@ -70,12 +80,17 @@ final class StreamController: NSObject {
         sessionInfo = session
         self.settings = settings
 
-        // nodeBaseUrl comes from session/details' CONFIRMED success body
-        // ({"data":{"gw":...}}) — see BoosteroidClient.fetchSessionDetails.
-        // Still guarded defensively since SessionInfo instances built from
-        // last-session (still-queued state) never populate it.
+        // Both come from session/details' CONFIRMED success body
+        // ({"data":{"gw":...,"queryString":...}}) — see
+        // BoosteroidClient.fetchSessionDetails. Guarded defensively since
+        // SessionInfo instances built from last-session (still-queued state)
+        // populate neither.
         guard let nodeBaseUrl = session.nodeBaseUrl else {
             state = .failed(message: "Session became active but its node/gateway host (nodeBaseUrl) is missing — this shouldn't happen once fetchSessionDetails has run; please report this.")
+            return
+        }
+        guard let queryString = session.queryString else {
+            state = .failed(message: "Session is missing its streaming token (queryString) — the control channel can't claim the session without it. This shouldn't happen once fetchSessionDetails has run; please report this.")
             return
         }
 
@@ -85,35 +100,8 @@ final class StreamController: NSObject {
         }
         signaling = client
 
-        do {
-            let iceServers = try await client.fetchIceServers()
-            // CONFIRMED this session negotiated H.264 — getParams told us so
-            // before we ever built the peer connection. TODO(protocol): decide
-            // whether to trust this over the user's StreamSettings.codec
-            // choice, or whether other codecs can be requested some other way
-            // (e.g. a query param on enqueue).
-            let params = try await client.fetchParams()
-            print("[StreamController] Boosteroid params: codec=\(params.codec) version=\(params.version)")
-
-            try await createPeerConnectionAndOffer(iceServers: iceServers)
-            client.startPollingRemoteICE()
-            connectControlChannel(nodeBaseUrl: nodeBaseUrl, session: session)
-        } catch {
-            state = .failed(message: error.localizedDescription)
-        }
-    }
-
-    /// CONFIRMED 2026-07-23: ALL input (keyboard/mouse/controller) rides a
-    /// separate JSON WebSocket, not the WebRTC data channel — see
-    /// BoosteroidControlChannel's header comment for the full protocol. This
-    /// used to be entirely missing: InputSender existed but was never even
-    /// instantiated, so `bindVideoView` was always handing the video view a
-    /// nil input handler.
-    private func connectControlChannel(nodeBaseUrl: String, session: SessionInfo) {
-        guard let queryString = session.queryString else {
-            print("[StreamController] No queryString on SessionInfo — control channel (all input) cannot authenticate. This shouldn't happen once fetchSessionDetails has run; please report this.")
-            return
-        }
+        // 1. Open the control WebSocket FIRST — this claims the session for
+        //    this device and is what the server gates media on.
         let (width, height) = Self.parseResolution(settings.resolution)
         let sender = InputSender(controlChannel: controlChannel, surfaceWidth: width, surfaceHeight: height)
         inputSender = sender
@@ -129,9 +117,48 @@ final class StreamController: NSObject {
                 refreshRate: self.settings.fps
             )
             sender.start()
+            var startedWebRTC = false
             for await event in stream {
+                // Input events (controller acks etc.) go to the sender.
                 sender.handleIncoming(event)
+                // 2. Start WebRTC media only once the control plane says so:
+                //    `settings/webrtc` on a fresh session, or the `stream/*`
+                //    burst when taking over/switching to an existing one.
+                switch event {
+                case .webrtcEngineReady, .sessionActive:
+                    if !startedWebRTC {
+                        startedWebRTC = true
+                        await self.startWebRTCMedia(client: client)
+                    }
+                case .failed(let message):
+                    if !startedWebRTC { self.state = .failed(message: "Control channel failed before streaming could start: \(message)") }
+                default:
+                    break
+                }
             }
+        }
+    }
+
+    /// The WebRTC signaling chain (getIceServers → getParams → offer → call →
+    /// ICE), CONFIRMED against real traffic. Called only after the control
+    /// channel signals the engine should start (see connect()).
+    private func startWebRTCMedia(client: BoosteroidSignalingClient) async {
+        // Guard against a duplicate trigger racing in (webrtcEngineReady AND
+        // the stream burst can both arrive).
+        guard peerConnection == nil else { return }
+        do {
+            let iceServers = try await client.fetchIceServers()
+            // CONFIRMED this session negotiated H.264 — getParams told us so
+            // before we ever built the peer connection. TODO(protocol): decide
+            // whether to trust this over the user's StreamSettings.codec
+            // choice, or whether other codecs can be requested some other way.
+            let params = try await client.fetchParams()
+            print("[StreamController] Boosteroid params: codec=\(params.codec) version=\(params.version)")
+
+            try await createPeerConnectionAndOffer(iceServers: iceServers)
+            client.startPollingRemoteICE()
+        } catch {
+            state = .failed(message: error.localizedDescription)
         }
     }
 

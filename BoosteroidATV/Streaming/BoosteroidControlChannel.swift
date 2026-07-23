@@ -2,18 +2,33 @@ import Foundation
 
 // MARK: - Boosteroid Control WebSocket
 //
-// CONFIRMED 2026-07-23, THE root-cause fix for keyboard/mouse/controller
-// input never working: this project previously assumed (carried over from
-// CloudNow/GFN) that input rides a WebRTC data channel, and InputSender was
-// built (and never even wired up — see StreamController) against that
-// assumption. Live testing proved that wrong — a real session accepted
-// clicks/keypresses from the browser, but this app's own RTCDataChannel
-// prototype patch never saw a single byte cross any data channel. Reading
-// Boosteroid's own `streaming.js` / `catch-events.js` bundles (fetched
-// directly and read — the same technique that cracked the queue-position
-// WebSocket earlier in this project) found the real mechanism: Boosteroid
-// runs ALL input — keyboard, mouse, and gamepad — over a single dedicated
-// JSON WebSocket, entirely separate from the WebRTC media path.
+// CONFIRMED 2026-07-23 via live testing + reading Boosteroid's own
+// `streaming.js`/`catch-events.js`/`webrtcstreamer.js` bundles. This socket
+// is the PRIMARY control plane for a streaming session — far more than an
+// "input channel":
+//
+//   1. Opening it CLAIMS THE SESSION FOR THIS DEVICE. Doing so triggers a
+//      "switch device" server-side — CONFIRMED by a live test: opening a
+//      second control socket (with clientType=native) against a session that
+//      was actively streaming in a browser instantly kicked the browser to a
+//      "you just switched your session to another device" screen. This is
+//      why the tvOS app, before it opened this socket at all, could only ever
+//      get video by piggybacking a session a browser had already claimed —
+//      and why opening it at the WRONG time (after WebRTC negotiation, as a
+//      first buggy pass did) black-screened everything.
+//   2. Once open, the server PUSHES session config on it: `settings/udpforward`
+//      (raw-UDP transport ports, unused by the WebRTC path), `settings/streamIds`
+//      (resolution), and a `stream/*` burst (`bitrate`, `framerate`, `key`).
+//   3. It GATES WebRTC: the web client starts its WebRTC engine
+//      (`WebRtcTransport.connect()` → getIceServers/call/ICE) ONLY from the
+//      handler for a `{"type":"settings","action":"webrtc"}` message pushed
+//      on THIS socket. So the correct order is: open this socket FIRST, wait
+//      for `settings/webrtc`, THEN do WebRTC signaling. StreamController now
+//      follows exactly that order (see its connect()).
+//   4. It carries ALL input — keyboard, mouse, and gamepad — as JSON frames,
+//      entirely separate from the WebRTC media path (the earlier assumption,
+//      carried over from CloudNow/GFN, that input rides a WebRTC data channel
+//      was wrong; a live RTCDataChannel capture saw zero input bytes).
 //
 // CONFIRMED URL construction (`SessionHandler.wssHandler` in streaming.js):
 //   wss://{nodeHost}/?{queryString}&x={width}&y={height}&lang={lang}
@@ -91,6 +106,20 @@ import Foundation
 // InputSender, not correctness gaps.
 actor BoosteroidControlChannel {
     enum IncomingEvent {
+        /// CONFIRMED 2026-07-23: the server pushes `{"type":"settings",
+        /// "action":"webrtc"}` on this socket to tell the client to start the
+        /// WebRTC engine — the web client's `WebRtcTransport.connect()` (the
+        /// getIceServers/call/ICE chain) is invoked ONLY from this message's
+        /// handler. This is THE signal StreamController waits for before doing
+        /// any WebRTC signaling. See this file's header for the full flow.
+        case webrtcEngineReady
+        /// The `{"type":"stream", ...}` config burst (bitrate/framerate/key)
+        /// the server sends once the session is live. Used as a fallback
+        /// trigger to start WebRTC when attaching to/taking over a session
+        /// that was already initialized elsewhere (a device *switch*, where
+        /// the server re-syncs this burst but does NOT re-send settings/webrtc
+        /// — CONFIRMED via a live switch test).
+        case sessionActive
         case controllerAck(name: String, id: String)
         case controllerRumble(id: String, left: Double, right: Double)
         case raw(type: String?, action: String?)
@@ -227,6 +256,17 @@ actor BoosteroidControlChannel {
                 left: (obj["left"] as? Double) ?? 0,
                 right: (obj["right"] as? Double) ?? 0
             ))
+            return
+        }
+        // CONFIRMED 2026-07-23: `settings/webrtc` is the "start the WebRTC
+        // engine now" signal; the `stream/*` burst (bitrate/framerate/key)
+        // marks the session as live. See IncomingEvent's doc comments.
+        if type == "settings", action == "webrtc" {
+            continuation.yield(.webrtcEngineReady)
+            return
+        }
+        if type == "stream" {
+            continuation.yield(.sessionActive)
             return
         }
         continuation.yield(.raw(type: type, action: action))

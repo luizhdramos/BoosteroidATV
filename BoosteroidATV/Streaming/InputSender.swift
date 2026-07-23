@@ -104,8 +104,9 @@ final class InputSender: InputEventHandler {
                 controllerIds[key] = id
                 pendingControllerNames.removeValue(forKey: key)
             }
-        case .controllerRumble, .raw, .closed, .failed:
-            break // TODO(protocol): rumble not wired to a vibration API yet.
+        case .webrtcEngineReady, .sessionActive, .controllerRumble, .raw, .closed, .failed:
+            break // Not input events (StreamController handles engine-start /
+                  // rumble not wired to a vibration API yet).
         }
     }
 
