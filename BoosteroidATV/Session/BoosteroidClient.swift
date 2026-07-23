@@ -149,23 +149,22 @@ actor BoosteroidClient {
         // already tracking THIS appId and still queued, attach to it
         // instead of enqueueing again (safe — nobody has "claimed" it yet).
         //
-        // Deliberately NOT done for an existing "LI" (already active)
-        // session: a same-session re-fetch of session/details was observed
-        // to immediately 406 "timeout" AND the browser tab that had been
-        // streaming it got kicked back to /dashboard — consistent with
-        // fetching details a second time force-ending the first claim, but
-        // this wasn't isolated from ordinary 15-minute-inactivity timeout in
-        // the time available to test, so it's unconfirmed which. Silently
-        // risking killing a session that's actively streaming on another
-        // device isn't an acceptable trade for "maybe" resuming smoothly —
-        // see the explicit error thrown below instead.
-        if let dto = try? await fetchLastSessionDTO(cookies: cookies), dto.data.appId == Int(request.gameId) {
-            if dto.data.status == "EN" {
-                return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
-            }
-            if dto.data.status == "LI" {
-                throw BoosteroidClientError.sessionAlreadyActiveElsewhere
-            }
+        // Also attaches to an existing "LI" (already active) session, e.g.
+        // one started in a browser — explicit user decision, accepting a
+        // known risk: a same-session re-fetch of session/details was
+        // observed once to immediately 406 "timeout" AND kick the browser
+        // tab that had been streaming it back to /dashboard, consistent
+        // with a second `session/details` fetch force-ending the first
+        // claim — but this wasn't isolated from ordinary 15-minute-
+        // inactivity timeout in the time available to test, so it's
+        // unconfirmed which. If it IS the former, that's arguably correct
+        // "switch device" behavior anyway (the old device loses the stream,
+        // the new one gets it) rather than a bug — see
+        // .sessionAlreadyActiveElsewhere's history in git log if this needs
+        // to be reverted to the safer throwing behavior instead.
+        if let dto = try? await fetchLastSessionDTO(cookies: cookies), dto.data.appId == Int(request.gameId),
+           dto.data.status == "EN" || dto.data.status == "LI" {
+            return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
         }
         let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
