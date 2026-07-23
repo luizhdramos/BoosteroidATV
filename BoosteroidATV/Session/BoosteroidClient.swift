@@ -90,59 +90,125 @@ actor BoosteroidClient {
 
     // MARK: Session Lifecycle
     //
-    // CONFIRMED flow, real endpoints, in order:
-    //   1. POST /api/v2/streaming/session/enqueue → 204 (starts the queue)
-    //   2. Queue position is shown live in the UI without visible REST
-    //      polling — TODO(protocol): almost certainly a WebSocket; URL/protocol
-    //      not isolated in this pass.
+    // CONFIRMED flow, real endpoints and bodies, in order:
+    //   1. POST /api/v2/streaming/session/enqueue  body: {"appId": <int>}
+    //      → 204, no response body (starts the queue).
+    //   2. GET /api/v1/streaming/user/last-session → 200
+    //      {"data":{"sessionId":"<uuid>","appId":<int>,"status":"EN"}}
+    //      — this, not enqueue's response, is where the sessionId comes from.
+    //      Queue position is shown live in the UI with NO visible REST
+    //      polling for it — two separate WebSocket-constructor capture
+    //      passes caught zero connections despite the on-screen position
+    //      visibly updating, which strongly suggests Boosteroid opens one
+    //      long-lived WS/SSE connection at app-shell load time (before this
+    //      kind of page-context script injection could ever patch it), not
+    //      per-queue. Polling last-session is the pragmatic, confirmed-
+    //      working substitute used below.
     //   3. Once ready, the UI navigates to
     //      cloud.boosteroid.com/static/streaming/streaming.html?sessionId={uuid}
-    //   4. That page calls POST /api/v1/streaming/session/details?sessionId=...
-    //      → 200, presumably returning the per-node WebRTC gateway host (e.g.
-    //      the confirmed "sp0.cloud.boosteroid.com") — see SessionInfo.
+    //      which calls POST /api/v1/streaming/session/details?sessionId=...
+    //      (CONFIRMED POST-only; GET → 405). TODO(protocol): its SUCCESS body
+    //      (should carry nodeBaseUrl) was never captured — every session
+    //      observed in this investigation pass either sat in a climbing
+    //      queue or had already timed out (confirmed 406 error shape, see
+    //      BoosteroidSessionDetailsErrorDTO) before reaching active.
 
     func createSession(_ request: SessionCreateRequest, cookies: [String: String]) async throws -> SessionInfo {
         let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // CONFIRMED 2026-07-22: "applicationId" got back
-        // {"appld":["The app id field is required."]} — then "app_id" got the
-        // SAME error verbatim (ruled out via a full app delete + clean build
-        // + reinstall, so it wasn't a stale-binary artifact). Laravel's
-        // FormatsMessages::getAttribute() actually snake_cases the attribute
-        // name BEFORE turning underscores into spaces, so "app id" is
-        // ambiguous between "app_id" and camelCase "appId" — both produce the
-        // identical message. Send both spellings together as a cheap hedge
-        // instead of guessing one at a time. TODO(protocol): still unconfirmed
-        // whether other fields (resolution/fps/region?) are required too —
-        // if this still 422s, the response body will now at least say which.
+        // CONFIRMED 2026-07-22 via a real captured request body: just
+        // {"appId": <int>} — camelCase, singular. (Earlier guesses of
+        // "applicationId", "app_id", and a hedge sending both "app_id" and
+        // "appId" together are no longer needed now that the real body has
+        // actually been observed.)
         let appIdValue: Any = Int(request.gameId) ?? request.gameId
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["app_id": appIdValue, "appId": appIdValue])
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["appId": appIdValue])
         let (data, response) = try await session.data(for: req)
         guard (response as? HTTPURLResponse)?.statusCode == 204 else {
             throw BoosteroidClientError.requestFailed("createSession/enqueue", String(data: data, encoding: .utf8) ?? "")
         }
+        return try await fetchLastSession(cookies: cookies)
+    }
+
+    /// CONFIRMED URL/shape: see the Session Lifecycle note above. Used both
+    /// to discover the sessionId right after enqueue and to poll queue
+    /// status thereafter (see pollSession).
+    private func fetchLastSession(cookies: [String: String]) async throws -> SessionInfo {
+        let url = URL(string: "\(apiBase)/v1/streaming/user/last-session")!
+        let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw BoosteroidClientError.requestFailed("last-session", String(data: data, encoding: .utf8) ?? "")
+        }
+        let dto = try JSONDecoder().decode(BoosteroidLastSessionDTO.self, from: data)
+        return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
+    }
+
+    /// Polls the confirmed-working last-session endpoint (see Session
+    /// Lifecycle note above for why this replaces a WebSocket that couldn't
+    /// be captured).
+    func pollSession(sessionId: String, cookies: [String: String]) async throws -> SessionInfo {
+        try await fetchLastSession(cookies: cookies)
+    }
+
+    /// CONFIRMED URL/method/error-shape — see the Session Lifecycle note
+    /// above. TODO(protocol): the success body (should carry nodeBaseUrl)
+    /// still isn't confirmed, so a successful 200 here still throws
+    /// .notImplemented, isolated to exactly this one spot.
+    func fetchSessionDetails(sessionId: String, cookies: [String: String]) async throws -> SessionInfo {
+        let url = URL(string: "\(apiBase)/v1/streaming/session/details?sessionId=\(sessionId)")!
+        let req = authenticatedRequest(url, cookies: cookies, method: "POST")
+        let (data, response) = try await session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 406,
+           let err = try? JSONDecoder().decode(BoosteroidSessionDetailsErrorDTO.self, from: data),
+           err.data.code == "timeout" {
+            throw BoosteroidClientError.sessionTimedOut
+        }
+        guard status == 200 else {
+            throw BoosteroidClientError.requestFailed("session/details", String(data: data, encoding: .utf8) ?? "")
+        }
         throw BoosteroidClientError.notImplemented(
-            "createSession — enqueue call succeeds (204) but the queue-ready signal (WebSocket?) and the session/details response shape (which should yield SessionInfo.nodeBaseUrl) are not yet captured/decoded."
+            "session/details returned 200, but its success body shape (needed for SessionInfo.nodeBaseUrl) has never actually been captured — decode it here once a live session reaches active status."
         )
     }
 
-    /// TODO(protocol): queue progress appears to be pushed (not polled) based
-    /// on the capture — this REST poll is a placeholder until the real
-    /// transport is confirmed.
-    func pollSession(sessionId: String, cookies: [String: String]) async throws -> SessionInfo {
-        throw BoosteroidClientError.notImplemented("pollSession — queue updates appear to be pushed, not polled; real transport unconfirmed")
+    /// Orchestrates the full queue → active flow: enqueue, poll last-session
+    /// until status moves away from "EN" (queued) or the timeout elapses,
+    /// then fetch session details. TODO(protocol): the real "active/ready"
+    /// status string is unconfirmed (see Session Lifecycle note) — this
+    /// treats ANY status other than "EN" as "try session/details now", which
+    /// will surface a clear error rather than hang silently if that guess is
+    /// ever wrong. Mirrors CloudNow's GFN queue flow (poll indefinitely, 180s
+    /// setup timeout) per this project's own conventions.
+    func createAndAwaitSession(
+        _ request: SessionCreateRequest,
+        cookies: [String: String],
+        pollIntervalNanoseconds: UInt64 = 2_000_000_000,
+        timeoutSeconds: TimeInterval = 180
+    ) async throws -> SessionInfo {
+        var current = try await createSession(request, cookies: cookies)
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while current.status == "EN", Date() < deadline {
+            try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+            current = try await pollSession(sessionId: current.sessionId, cookies: cookies)
+        }
+        guard current.status != "EN" else {
+            throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Queue wait exceeded \(Int(timeoutSeconds))s")
+        }
+        return try await fetchSessionDetails(sessionId: current.sessionId, cookies: cookies)
     }
 
-    /// CONFIRMED URL: GET /api/v1/streaming/user/last-session → 200. Likely
-    /// used to detect/resume an in-progress session. Response shape unconfirmed.
+    /// CONFIRMED URL/shape (same last-session endpoint/DTO as above). Used
+    /// to detect/resume an in-progress session.
     func getActiveSessions(cookies: [String: String]) async throws -> [ActiveSessionInfo] {
         let url = URL(string: "\(apiBase)/v1/streaming/user/last-session")!
         let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw BoosteroidClientError.requestFailed("getActiveSessions", String(data: data, encoding: .utf8) ?? "")
         }
-        throw BoosteroidClientError.notImplemented("getActiveSessions — endpoint confirmed reachable, response decoding not yet written")
+        let dto = try JSONDecoder().decode(BoosteroidLastSessionDTO.self, from: data)
+        return [ActiveSessionInfo(sessionId: dto.data.sessionId, status: dto.data.status, gameId: String(dto.data.appId))]
     }
 
     /// TODO(protocol): no `/webrtc/api/hangup`-style call was observed when
@@ -158,6 +224,11 @@ actor BoosteroidClient {
 enum BoosteroidClientError: Error, LocalizedError {
     case notImplemented(String)
     case requestFailed(String, String)
+    /// CONFIRMED shape: session/details returns HTTP 406 with
+    /// {"data":{"code":"timeout",...}} for a session that expired while
+    /// queued/idle. Surfaced distinctly so the UI can show a clear
+    /// "try again" message instead of a raw error body.
+    case sessionTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -165,6 +236,8 @@ enum BoosteroidClientError: Error, LocalizedError {
             return "Not implemented yet: \(detail)"
         case .requestFailed(let name, let body):
             return "\(name) failed: \(body)"
+        case .sessionTimedOut:
+            return "Session timed out while waiting in queue. Please try again."
         }
     }
 }

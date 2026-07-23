@@ -33,29 +33,64 @@ struct IceServer: Codable {
 
 // MARK: - Session Info
 //
-// CONFIRMED fields: `sessionId` and `nodeBaseUrl` (e.g.
-// "https://sp0.cloud.boosteroid.com") are real — the streaming client page at
-// cloud.boosteroid.com/static/streaming/streaming.html?sessionId={uuid} calls
-// the WebRTC signaling REST API (getIceServers, getParams, call,
-// addIceCandidate, getIceCandidate — see SignalingClient.swift) against
-// exactly this kind of per-node host.
+// CONFIRMED 2026-07-22 live (fetch-patch finally caught real traffic on a
+// second capture pass, after the first two attempts on the enqueue call came
+// back empty): `GET /api/v1/streaming/user/last-session` returns
+//   {"data":{"sessionId":"<uuid>","appId":<int>,"status":"EN"}}
+// "EN" was observed for a session sitting in queue. TODO(protocol): the
+// status value once a session goes live was NOT captured — the only queue
+// watched in this pass sat at position ~52-55 the whole time (Boosteroid's
+// free-tier queue position can climb, not just fall, as paying-tier users
+// cut ahead) and a separate stale session from an earlier capture pass had
+// already timed out server-side by the time it was checked again. Treat
+// "EN" as "still queued" and any other status as "worth trying
+// session/details".
 //
-// TODO(protocol): the exact response body of
-// POST /api/v1/streaming/session/details?sessionId=... (which almost
-// certainly carries `nodeBaseUrl`, and maybe `status`/queue info) was not
-// captured — its field names below are inferred, not observed byte-for-byte.
+// CONFIRMED: `POST /api/v1/streaming/session/details?sessionId=...` is
+// POST-only (a GET returns 405 with a body naming POST as the only
+// supported method). For an actually-expired session it returns HTTP 406
+// with:
+//   {"data":{"title":"TIMEOUT!","message":"Session has been ended by
+//   timeout","icon":"cry","code":"timeout"}}
+// TODO(protocol): the SUCCESS body (which should carry `nodeBaseUrl`, e.g.
+// "https://sp0.cloud.boosteroid.com" — confirmed as a real per-node host
+// from the earlier eFootball capture, just not re-confirmed as THIS
+// endpoint's field) was not captured — no session in this pass reached
+// "active" before timing out.
 struct SessionInfo {
     let sessionId: String
-    let nodeBaseUrl: String
-    let status: Int
-    let queuePosition: Int?
+    var nodeBaseUrl: String?
+    let status: String
 
-    var isInQueue: Bool { (queuePosition ?? 0) > 0 }
+    var isInQueue: Bool { status == "EN" }
+}
+
+/// CONFIRMED shape of `GET /api/v1/streaming/user/last-session`'s `data`
+/// object — see SessionInfo doc comment above.
+struct BoosteroidLastSessionDTO: Codable {
+    struct Payload: Codable {
+        let sessionId: String
+        let appId: Int
+        let status: String
+    }
+    let data: Payload
+}
+
+/// CONFIRMED shape of `POST /api/v1/streaming/session/details`'s error body
+/// for an expired/timed-out session (HTTP 406) — see SessionInfo doc comment.
+struct BoosteroidSessionDetailsErrorDTO: Codable {
+    struct Payload: Codable {
+        let title: String?
+        let message: String?
+        let icon: String?
+        let code: String?
+    }
+    let data: Payload
 }
 
 struct ActiveSessionInfo {
     let sessionId: String
-    let status: Int
+    let status: String
     let gameId: String?
 }
 
@@ -115,13 +150,16 @@ struct GameInfo: Identifiable, Equatable {
 
 // MARK: - Session Create Request
 //
-// CONFIRMED: POST /api/v2/streaming/session/enqueue → 204 (no observed
-// response body) is what actually kicks off a session; the UI then shows a
-// "Posição na fila" (queue position) screen and eventually redirects to the
-// streaming.html page with a sessionId. TODO(protocol): the exact request
-// body sent to /enqueue wasn't captured (blocked by the browser tool's
-// exfil-prevention filter on raw JS dumps) — likely at minimum the numeric
-// application id and requested resolution/fps.
+// CONFIRMED 2026-07-22 live (real captured request body):
+//   POST /api/v2/streaming/session/enqueue
+//   body: {"appId": <int>}
+//   → 204, no response body.
+// The UI then shows a "Posição na fila" (queue position) screen; the actual
+// sessionId/status for that queue is retrieved via a follow-up call to
+// last-session, not from enqueue's (empty) response — see
+// BoosteroidClient.createSession. TODO(protocol): whether other fields
+// (resolution/fps/region) can also be sent on enqueue is still unconfirmed —
+// the real client only sent `appId` in the captured request.
 struct SessionCreateRequest {
     let gameId: String
     let settings: StreamSettings

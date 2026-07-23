@@ -68,7 +68,16 @@ final class StreamController: NSObject {
         sessionInfo = session
         self.settings = settings
 
-        let client = BoosteroidSignalingClient(nodeBaseUrl: session.nodeBaseUrl, sessionId: session.sessionId)
+        // TODO(protocol): nodeBaseUrl comes from session/details' success
+        // body, which BoosteroidClient.fetchSessionDetails hasn't been able
+        // to capture/decode yet (see its doc comment) — so today this always
+        // fails here with a clear message instead of silently misbehaving.
+        guard let nodeBaseUrl = session.nodeBaseUrl else {
+            state = .failed(message: "Session became active but its node/gateway host (nodeBaseUrl) hasn't been decoded yet — see BoosteroidClient.fetchSessionDetails TODO(protocol).")
+            return
+        }
+
+        let client = BoosteroidSignalingClient(nodeBaseUrl: nodeBaseUrl, sessionId: session.sessionId)
         client.onEvent = { [weak self] event in
             Task { @MainActor in self?.handleSignalingEvent(event) }
         }

@@ -80,7 +80,13 @@ struct StreamView: View {
         do {
             let cookies = try await authManager.resolveCookies()
             let client = BoosteroidClient()
-            let session = try await client.createSession(
+            // createAndAwaitSession enqueues, polls the confirmed
+            // last-session endpoint until the queue clears (or 180s
+            // elapses), then fetches session/details. TODO(protocol):
+            // session/details' success body (nodeBaseUrl) still isn't
+            // captured, so this currently throws .notImplemented right at
+            // the point queue wait finishes — see BoosteroidClient.swift.
+            let session = try await client.createAndAwaitSession(
                 SessionCreateRequest(gameId: game.id, settings: settings),
                 cookies: cookies
             )
