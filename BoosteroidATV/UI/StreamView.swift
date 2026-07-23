@@ -14,6 +14,9 @@ struct StreamView: View {
     @State private var controller = StreamController()
     @State private var showOverlay = false
     @State private var errorMessage: String?
+    @State private var queueAttempt = 0
+    @State private var queueStatus = ""
+    @State private var queueStartedAt = Date()
 
     var body: some View {
         ZStack {
@@ -28,6 +31,28 @@ struct StreamView: View {
                         ProgressView().scaleEffect(2).tint(.white)
                         Text("Connecting to \(game.title)...")
                             .foregroundStyle(.white)
+                        // Boosteroid's confirmed last-session API has no
+                        // numeric queue-position field (the web UI's
+                        // "Posição na fila" is pushed over a WebSocket this
+                        // app can't capture) — so this is the most honest
+                        // status we can show: still queued, how long, and a
+                        // way out instead of a silent spinner.
+                        if queueAttempt > 0 {
+                            VStack(spacing: 8) {
+                                Text("Still in queue (status: \(queueStatus)) — waited \(Int(Date().timeIntervalSince(queueStartedAt)))s")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("Boosteroid's free-tier queue position can rise as paying-tier users join — this can take a while or may not clear at all.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 120)
+                            }
+                        }
+                        Button("Cancel") { onDismiss() }
+                            .buttonStyle(.bordered)
+                            .tint(.gray)
+                            .padding(.top, 8)
                     }
                 }
             case .streaming:
@@ -77,6 +102,7 @@ struct StreamView: View {
     }
 
     private func start() async {
+        queueStartedAt = Date()
         do {
             let cookies = try await authManager.resolveCookies()
             let client = BoosteroidClient()
@@ -88,7 +114,11 @@ struct StreamView: View {
             // the point queue wait finishes — see BoosteroidClient.swift.
             let session = try await client.createAndAwaitSession(
                 SessionCreateRequest(gameId: game.id, settings: settings),
-                cookies: cookies
+                cookies: cookies,
+                onPoll: { info, attempt in
+                    queueAttempt = attempt
+                    queueStatus = info.status
+                }
             )
             await controller.connect(session: session, settings: settings)
         } catch {

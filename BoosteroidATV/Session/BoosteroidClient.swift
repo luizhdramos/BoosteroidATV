@@ -181,20 +181,32 @@ actor BoosteroidClient {
     /// will surface a clear error rather than hang silently if that guess is
     /// ever wrong. Mirrors CloudNow's GFN queue flow (poll indefinitely, 180s
     /// setup timeout) per this project's own conventions.
+    /// `onPoll` fires once right after enqueue (attempt 0) and again after
+    /// every subsequent poll, so callers can show *something* better than a
+    /// silent spinner — the confirmed last-session shape has no numeric
+    /// queue-position field (that's only shown in the web UI, pushed over
+    /// the WebSocket this app can't capture — see Session lifecycle note),
+    /// so all we can surface is the raw status string and how long we've
+    /// been waiting.
     func createAndAwaitSession(
         _ request: SessionCreateRequest,
         cookies: [String: String],
         pollIntervalNanoseconds: UInt64 = 2_000_000_000,
-        timeoutSeconds: TimeInterval = 180
+        timeoutSeconds: TimeInterval = 180,
+        onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil
     ) async throws -> SessionInfo {
         var current = try await createSession(request, cookies: cookies)
+        await onPoll?(current, 0)
         let deadline = Date().addingTimeInterval(timeoutSeconds)
+        var attempt = 0
         while current.status == "EN", Date() < deadline {
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
             current = try await pollSession(sessionId: current.sessionId, cookies: cookies)
+            attempt += 1
+            await onPoll?(current, attempt)
         }
         guard current.status != "EN" else {
-            throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Queue wait exceeded \(Int(timeoutSeconds))s")
+            throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Queue wait exceeded \(Int(timeoutSeconds))s — Boosteroid's free-tier queue position can climb as paying-tier users cut ahead, so this can happen even after a long wait. Try again later.")
         }
         return try await fetchSessionDetails(sessionId: current.sessionId, cookies: cookies)
     }
