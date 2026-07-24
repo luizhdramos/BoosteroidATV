@@ -8,15 +8,12 @@ struct HomeView: View {
     let games: [GameInfo]
     let onPlay: (GameInfo) -> Void
 
-    /// Vertical space the pinned header occupies — the grid is inset by this
-    /// so its first row starts below the header, then scrolls up UNDER it.
-    private let headerReserve: CGFloat = 124
-
     var body: some View {
         ZStack(alignment: .top) {
             BoosteroidTheme.background.ignoresSafeArea()
 
-            // Content scrolls the full height and passes behind the header.
+            // The brand mark is pinned by MainTabView as a fixed overlay (so it
+            // doesn't scroll with the grid), so this view is just the content.
             ScrollView {
                 Group {
                     if games.isEmpty {
@@ -42,26 +39,10 @@ struct HomeView: View {
                         }
                     }
                 }
-                .padding(.top, headerReserve)
+                .padding(.top, 24)
                 .padding(.horizontal, 40)
                 .padding(.bottom, 40)
             }
-
-            // Fade scrim: fills with the background at the very top and fades to
-            // clear just below the header, so rows scrolling up dissolve under
-            // the pinned header instead of being cut off at a hard edge.
-            LinearGradient(
-                colors: [BoosteroidTheme.background, BoosteroidTheme.background, BoosteroidTheme.background.opacity(0)],
-                startPoint: .top, endPoint: .bottom
-            )
-            .frame(height: headerReserve + 28)
-            .frame(maxWidth: .infinity)
-            .allowsHitTesting(false)
-
-            // The pinned header itself.
-            BrandHeader()
-                .padding(.horizontal, 40)
-                .padding(.top, 24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -119,26 +100,31 @@ enum BoosteroidTheme {
 // gradient wordmark. Purely decorative — not focusable — so it never steals
 // focus from the game grid.
 struct BrandHeader: View {
+    /// Compact = a small badge + wordmark, used for the fixed top-left mark.
+    var compact: Bool = false
+
     var body: some View {
-        HStack(spacing: 20) {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+        HStack(spacing: compact ? 12 : 20) {
+            RoundedRectangle(cornerRadius: compact ? 10 : 16, style: .continuous)
                 .fill(BoosteroidTheme.brandGradient)
-                .frame(width: 68, height: 68)
+                .frame(width: compact ? 44 : 68, height: compact ? 44 : 68)
                 .overlay(
                     Image(systemName: "bolt.fill")
-                        .font(.system(size: 34, weight: .heavy))
+                        .font(.system(size: compact ? 22 : 34, weight: .heavy))
                         .foregroundStyle(.white)
                 )
-                .shadow(color: BoosteroidTheme.indigo.opacity(0.55), radius: 16, y: 6)
+                .shadow(color: BoosteroidTheme.indigo.opacity(0.55), radius: compact ? 10 : 16, y: compact ? 4 : 6)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Boosteroid")
-                    .font(.system(size: 46, weight: .heavy, design: .rounded))
+                    .font(.system(size: compact ? 30 : 46, weight: .heavy, design: .rounded))
                     .foregroundStyle(BoosteroidTheme.brandGradient)
-                Text("CLOUD GAMING ON APPLE TV")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .tracking(4)
-                    .foregroundStyle(.white.opacity(0.55))
+                if !compact {
+                    Text("CLOUD GAMING ON APPLE TV")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .tracking(4)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
             }
 
             Spacer(minLength: 0)
