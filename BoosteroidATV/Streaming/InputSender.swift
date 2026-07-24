@@ -70,13 +70,16 @@ final class InputSender: InputEventHandler {
             "LeftBtnState": false, "MiddleBtnState": false, "RightBtnState": false,
         ]) }
 
+        // queue: .main means these fire on the main thread, so hop to the main
+        // actor synchronously (assumeIsolated) instead of spawning a Task that
+        // captures self concurrently.
         connectObserver = NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] note in
             guard let controller = note.object as? GCController else { return }
-            Task { @MainActor in self?.handleControllerConnected(controller) }
+            MainActor.assumeIsolated { self?.handleControllerConnected(controller) }
         }
         disconnectObserver = NotificationCenter.default.addObserver(forName: .GCControllerDidDisconnect, object: nil, queue: .main) { [weak self] note in
             guard let controller = note.object as? GCController else { return }
-            Task { @MainActor in self?.handleControllerDisconnected(controller) }
+            MainActor.assumeIsolated { self?.handleControllerDisconnected(controller) }
         }
         for controller in GCController.controllers() {
             handleControllerConnected(controller)

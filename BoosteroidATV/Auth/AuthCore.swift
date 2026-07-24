@@ -10,7 +10,7 @@ import Security
 // page (unlike GFN) — it's email/password (behind a Cloudflare Turnstile
 // challenge) or Google OAuth. See BoosteroidAuthAPI.swift for the full
 // confirmed/unconfirmed breakdown.
-enum BoosteroidAuth {
+nonisolated enum BoosteroidAuth {
     /// CONFIRMED real entry point — offers Google OAuth or email/password.
     static let loginStartUrl = "https://cloud.boosteroid.com/auth/start"
 
@@ -35,7 +35,7 @@ enum BoosteroidAuth {
 // authorization-code + PKCE flow (common for web-based cloud gaming logins).
 // Unused until that's confirmed.
 
-struct PKCE {
+nonisolated struct PKCE {
     let verifier: String
     let challenge: String
 
@@ -64,7 +64,7 @@ struct PKCE {
 // Generic secure storage for the persisted auth session. Protocol-agnostic —
 // no changes needed once the real auth flow is confirmed.
 
-enum KeychainService {
+nonisolated enum KeychainService {
     private static let service = "com.luizhdramos.BoosteroidATV"
     private static let account = "boosteroid-auth-session"
 
@@ -121,7 +121,7 @@ enum KeychainService {
 
 // MARK: - Session Models
 
-struct AuthTokens: Codable {
+nonisolated struct AuthTokens: Codable {
     var accessToken: String
     var refreshToken: String?
     /// Raw cookies captured from the embedded web login, in case the API turns
@@ -133,7 +133,7 @@ struct AuthTokens: Codable {
     var isNearExpiry: Bool { expiresAt.timeIntervalSinceNow < 10 * 60 }
 }
 
-struct AuthUser: Codable {
+nonisolated struct AuthUser: Codable {
     let userId: String
     let displayName: String
     let email: String?
@@ -141,14 +141,14 @@ struct AuthUser: Codable {
     var membershipTier: String
 }
 
-struct AuthSession: Codable {
+nonisolated struct AuthSession: Codable {
     var tokens: AuthTokens
     var user: AuthUser
 }
 
 // MARK: - Errors
 
-enum AuthError: Error, LocalizedError {
+nonisolated enum AuthError: Error, LocalizedError {
     case noAuthCode
     case tokenExchangeFailed(String)
     case tokenRefreshFailed(String)

@@ -51,6 +51,11 @@ final class StreamController: NSObject {
     /// says whether ICE connected, a video track arrived, and frames are
     /// decoding (no device console available).
     private(set) var iceState: String = "new"
+    /// The DTLS/overall peer connection state — distinguishes "ICE connected
+    /// but DTLS never completed" (data channel never opens, server sends no
+    /// media) from "fully connected".
+    private(set) var peerConnState: String = "new"
+    private(set) var dataChannelState: String = "-"
     private(set) var gotVideoTrack = false
     private(set) var framesDecoded = 0
     private var lastBytesReceived = 0
@@ -76,7 +81,7 @@ final class StreamController: NSObject {
     private var iceCanSend = false
     private var pendingLocalICE: [(sdp: String, sdpMid: String?, sdpMLineIndex: Int)] = []
     private(set) var videoView: VideoSurfaceView?
-    private var statsTimer: Timer?
+    private var statsTask: Task<Void, Never>?
     private var sessionInfo: SessionInfo?
     private var settings = StreamSettings()
 
@@ -232,8 +237,8 @@ final class StreamController: NSObject {
     }
 
     func disconnect() {
-        statsTimer?.invalidate()
-        statsTimer = nil
+        statsTask?.cancel()
+        statsTask = nil
         inputSender?.stop()
         inputSender = nil
         controlChannelTask?.cancel()
@@ -267,7 +272,7 @@ final class StreamController: NSObject {
             break // offer/answer handled directly in connect(), not as an event
         case .remoteICE(let candidate, let sdpMid, let sdpMLineIndex):
             let ice = LKRTCIceCandidate(sdp: candidate, sdpMLineIndex: Int32(sdpMLineIndex ?? 0), sdpMid: sdpMid)
-            peerConnection?.add(ice)
+            peerConnection?.add(ice) { _ in }
         case .disconnected(let reason):
             state = .disconnected(reason: reason)
         case .log(let message):
@@ -347,38 +352,66 @@ final class StreamController: NSObject {
     // MARK: Private — Stats
 
     private func startStatsLoop() {
-        statsTimer?.invalidate()
-        statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self, let pc = self.peerConnection else { return }
-            pc.statistics { [weak self] report in
-                // Parse the standard WebRTC inbound-rtp video stats. Runs on a
-                // WebRTC thread, so snapshot into immutable lets and hop to the
-                // main actor to publish (avoids capturing mutable vars).
-                var frames = 0, bytes = 0, w = 0, h = 0
-                var fps = 0.0
-                for (_, stat) in report.statistics where stat.type == "inbound-rtp" {
-                    let v = stat.values
-                    let kind = (v["kind"] as? String) ?? (v["mediaType"] as? String) ?? ""
-                    guard kind == "video" else { continue }
-                    frames = (v["framesDecoded"] as? NSNumber)?.intValue ?? frames
-                    fps = (v["framesPerSecond"] as? NSNumber)?.doubleValue ?? fps
-                    w = (v["frameWidth"] as? NSNumber)?.intValue ?? w
-                    h = (v["frameHeight"] as? NSNumber)?.intValue ?? h
-                    bytes = (v["bytesReceived"] as? NSNumber)?.intValue ?? bytes
+        statsTask?.cancel()
+        statsTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, let pc = self.peerConnection else { return }
+                self.peerConnState = Self.peerStateLabel(pc.connectionState)
+                self.dataChannelState = Self.dcStateLabel(self.clientDataChannel?.readyState)
+                pc.statistics { [weak self] report in
+                    // Parse standard inbound-rtp video stats. Runs on a WebRTC
+                    // thread → snapshot into immutable lets, publish on the main
+                    // actor.
+                    var frames = 0, bytes = 0, w = 0, h = 0
+                    var fps = 0.0
+                    for (_, stat) in report.statistics where stat.type == "inbound-rtp" {
+                        let v = stat.values
+                        let kind = (v["kind"] as? String) ?? (v["mediaType"] as? String) ?? ""
+                        guard kind == "video" else { continue }
+                        frames = (v["framesDecoded"] as? NSNumber)?.intValue ?? frames
+                        fps = (v["framesPerSecond"] as? NSNumber)?.doubleValue ?? fps
+                        w = (v["frameWidth"] as? NSNumber)?.intValue ?? w
+                        h = (v["frameHeight"] as? NSNumber)?.intValue ?? h
+                        bytes = (v["bytesReceived"] as? NSNumber)?.intValue ?? bytes
+                    }
+                    let fFrames = frames, fBytes = bytes, fW = w, fH = h
+                    let fFps = fps
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let delta = max(0, fBytes - self.lastBytesReceived)
+                        self.lastBytesReceived = fBytes
+                        self.stats.bitrateKbps = delta * 8 / 1000
+                        self.stats.fps = fFps
+                        self.stats.resolutionWidth = fW
+                        self.stats.resolutionHeight = fH
+                        self.framesDecoded = fFrames
+                    }
                 }
-                let fFrames = frames, fBytes = bytes, fW = w, fH = h
-                let fFps = fps
-                Task { @MainActor in
-                    guard let self else { return }
-                    let delta = max(0, fBytes - self.lastBytesReceived)
-                    self.lastBytesReceived = fBytes
-                    self.stats.bitrateKbps = delta * 8 / 1000
-                    self.stats.fps = fFps
-                    self.stats.resolutionWidth = fW
-                    self.stats.resolutionHeight = fH
-                    self.framesDecoded = fFrames
-                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
+        }
+    }
+
+    nonisolated private static func peerStateLabel(_ s: LKRTCPeerConnectionState) -> String {
+        switch s {
+        case .new: return "new"
+        case .connecting: return "connecting"
+        case .connected: return "connected"
+        case .disconnected: return "disconnected"
+        case .failed: return "failed"
+        case .closed: return "closed"
+        @unknown default: return "unknown"
+        }
+    }
+
+    nonisolated private static func dcStateLabel(_ s: LKRTCDataChannelState?) -> String {
+        switch s {
+        case .connecting: return "connecting"
+        case .open: return "open"
+        case .closing: return "closing"
+        case .closed: return "closed"
+        case nil: return "-"
+        @unknown default: return "?"
         }
     }
 }

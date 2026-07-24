@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Stream Settings
 
-struct StreamSettings: Codable, Equatable {
+nonisolated struct StreamSettings: Codable, Equatable {
     var resolution: String = "1920x1080"
     var fps: Int = 60
     var maxBitrateKbps: Int = 20_000 { didSet { maxBitrateKbps = min(maxBitrateKbps, 100_000) } }
@@ -12,7 +12,7 @@ struct StreamSettings: Codable, Equatable {
     var controllerDeadzone: Double = 0.15
 }
 
-enum VideoCodec: String, Codable, CaseIterable {
+nonisolated enum VideoCodec: String, Codable, CaseIterable {
     case h264 = "H264"
     case h265 = "H265"
     case av1  = "AV1"
@@ -25,7 +25,7 @@ enum VideoCodec: String, Codable, CaseIterable {
 //   {"iceServers":[{"credential":"...","urls":["turn:HOST:3478?transport=udp"],
 //     "username":"<unixSeconds>:boosteroid"}],"iceTransportPolicy":"all"}
 
-struct IceServer: Codable {
+nonisolated struct IceServer: Codable {
     let urls: [String]
     let username: String?
     let credential: String?
@@ -41,7 +41,7 @@ struct IceServer: Codable {
 // wss://cloud.boosteroid.com/ws — see BoosteroidRealtimeClient and
 // AuthManager.resolveRealtimeCredentials. Shared between BoosteroidAuthAPI
 // (login) and BoosteroidClient (fetchCurrentUser) since both need it.
-struct BoosteroidUserResponseDTO: Codable {
+nonisolated struct BoosteroidUserResponseDTO: Codable {
     struct Payload: Codable {
         let id: Int
         let name: String
@@ -94,7 +94,7 @@ struct BoosteroidUserResponseDTO: Codable {
 // found): it's never sent to the `webrtc/api/*` media-signaling calls, but
 // it IS the required auth for the separate control WebSocket that carries
 // all keyboard/mouse/controller input — see BoosteroidControlChannel.
-struct SessionInfo {
+nonisolated struct SessionInfo {
     let sessionId: String
     var nodeBaseUrl: String?
     let status: String
@@ -111,7 +111,7 @@ struct SessionInfo {
 
 /// CONFIRMED shape of `GET /api/v1/streaming/user/last-session`'s `data`
 /// object — see SessionInfo doc comment above.
-struct BoosteroidLastSessionDTO: Codable {
+nonisolated struct BoosteroidLastSessionDTO: Codable {
     struct Payload: Codable {
         let sessionId: String
         let appId: Int
@@ -122,7 +122,7 @@ struct BoosteroidLastSessionDTO: Codable {
 
 /// CONFIRMED shape of `POST /api/v1/streaming/session/details`'s SUCCESS
 /// body (HTTP 200) — see SessionInfo doc comment above.
-struct BoosteroidSessionDetailsSuccessDTO: Codable {
+nonisolated struct BoosteroidSessionDetailsSuccessDTO: Codable {
     struct Payload: Codable {
         let gw: String
         let queryString: String?
@@ -132,7 +132,7 @@ struct BoosteroidSessionDetailsSuccessDTO: Codable {
 
 /// CONFIRMED shape of `POST /api/v1/streaming/session/details`'s error body
 /// for an expired/timed-out session (HTTP 406) — see SessionInfo doc comment.
-struct BoosteroidSessionDetailsErrorDTO: Codable {
+nonisolated struct BoosteroidSessionDetailsErrorDTO: Codable {
     struct Payload: Codable {
         let title: String?
         let message: String?
@@ -142,7 +142,7 @@ struct BoosteroidSessionDetailsErrorDTO: Codable {
     let data: Payload
 }
 
-struct ActiveSessionInfo {
+nonisolated struct ActiveSessionInfo {
     let sessionId: String
     let status: String
     let gameId: String?
@@ -167,7 +167,7 @@ struct ActiveSessionInfo {
 // GET /api/v1/boostore/applications/{id} (single game) and
 // GET /api/v1/boostore/carousel?isSub=true (hero banner) presumably share
 // this same per-application shape; TODO(protocol) confirm once used.
-struct BoosteroidApplicationDTO: Codable {
+nonisolated struct BoosteroidApplicationDTO: Codable {
     let id: Int
     let name: String
     let icon: String?
@@ -175,11 +175,11 @@ struct BoosteroidApplicationDTO: Codable {
     let installed: Bool
 }
 
-struct BoosteroidPaginatedApplications: Codable {
+nonisolated struct BoosteroidPaginatedApplications: Codable {
     let data: [BoosteroidApplicationDTO]
 }
 
-struct GameInfo: Identifiable, Equatable {
+nonisolated struct GameInfo: Identifiable, Equatable {
     let id: String
     let title: String
     let boxArtUrl: String?
@@ -214,7 +214,7 @@ struct GameInfo: Identifiable, Equatable {
 // BoosteroidClient.createSession. TODO(protocol): whether other fields
 // (resolution/fps/region) can also be sent on enqueue is still unconfirmed —
 // the real client only sent `appId` in the captured request.
-struct SessionCreateRequest {
+nonisolated struct SessionCreateRequest {
     let gameId: String
     let settings: StreamSettings
 }
