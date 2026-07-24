@@ -74,6 +74,22 @@ struct StreamView: View {
             case .streaming:
                 VideoSurfaceViewRepresentable(streamController: controller, showOverlay: showOverlay)
                     .ignoresSafeArea()
+                // Always-on diagnostic HUD: if the screen is black, this says
+                // whether ICE connected, a video track arrived, and frames are
+                // decoding — so we can tell "media not arriving" from "arriving
+                // but not rendering". (Temporary; remove once video is solid.)
+                VStack {
+                    HStack {
+                        Text("ICE \(controller.iceState) · track \(controller.gotVideoTrack ? "yes" : "no") · frames \(controller.framesDecoded) · \(controller.stats.resolutionWidth)x\(controller.stats.resolutionHeight) · \(Int(controller.stats.fps))fps · \(controller.stats.bitrateKbps)kbps")
+                            .font(.caption.monospaced())
+                            .padding(8)
+                            .background(.black.opacity(0.6))
+                            .foregroundStyle(.white)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(24)
                 if showOverlay {
                     overlay
                 }

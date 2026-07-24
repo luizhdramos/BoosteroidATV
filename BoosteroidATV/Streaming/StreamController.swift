@@ -47,6 +47,13 @@ final class StreamController: NSObject {
     /// Rolling log of raw control-channel messages, surfaced on failure to help
     /// diagnose a stuck connect on a real device (no console access there).
     private(set) var controlLog: [String] = []
+    /// Live diagnostics shown on-screen while streaming — so a BLACK SCREEN
+    /// says whether ICE connected, a video track arrived, and frames are
+    /// decoding (no device console available).
+    private(set) var iceState: String = "new"
+    private(set) var gotVideoTrack = false
+    private(set) var framesDecoded = 0
+    private var lastBytesReceived = 0
 
     private var peerConnection: LKRTCPeerConnection?
     private var signaling: BoosteroidSignalingClient?
@@ -307,12 +314,30 @@ final class StreamController: NSObject {
         statsTimer?.invalidate()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            Task { @MainActor in
-                self.peerConnection?.statistics { report in
-                    // TODO(protocol): parse `report` into StreamStats. The keys
-                    // needed here (video decoder stats, RTT, packet loss) are
-                    // standard WebRTC getStats() fields, so this part doesn't
-                    // depend on Boosteroid specifics — just needs implementing.
+            self.peerConnection?.statistics { [weak self] report in
+                // Parse the standard WebRTC inbound-rtp video stats. Runs on a
+                // WebRTC thread, so hop back to the main actor to publish.
+                var frames = 0, bytes = 0, w = 0, h = 0
+                var fps = 0.0
+                for (_, stat) in report.statistics where stat.type == "inbound-rtp" {
+                    let v = stat.values
+                    let kind = (v["kind"] as? String) ?? (v["mediaType"] as? String) ?? ""
+                    guard kind == "video" else { continue }
+                    frames = (v["framesDecoded"] as? NSNumber)?.intValue ?? frames
+                    fps = (v["framesPerSecond"] as? NSNumber)?.doubleValue ?? fps
+                    w = (v["frameWidth"] as? NSNumber)?.intValue ?? w
+                    h = (v["frameHeight"] as? NSNumber)?.intValue ?? h
+                    bytes = (v["bytesReceived"] as? NSNumber)?.intValue ?? bytes
+                }
+                Task { @MainActor in
+                    guard let self else { return }
+                    let delta = max(0, bytes - self.lastBytesReceived)
+                    self.lastBytesReceived = bytes
+                    self.stats.bitrateKbps = delta * 8 / 1000
+                    self.stats.fps = fps
+                    self.stats.resolutionWidth = w
+                    self.stats.resolutionHeight = h
+                    self.framesDecoded = frames
                 }
             }
         }
@@ -334,6 +359,7 @@ extension StreamController: LKRTCPeerConnectionDelegate {
         Task { @MainActor in
             self.videoTrack = track
             self.videoView?.videoTrack = track
+            self.gotVideoTrack = true
             self.watchdogTasks.forEach { $0.cancel() }
             self.watchdogTasks = []
             self.stage = ""
@@ -349,8 +375,27 @@ extension StreamController: LKRTCPeerConnectionDelegate {
     }
 
     nonisolated func peerConnection(_ peerConnection: LKRTCPeerConnection, didChange newState: LKRTCIceConnectionState) {
-        if newState == .failed || newState == .closed {
-            Task { @MainActor in self.state = .disconnected(reason: "ICE connection \(newState)") }
+        let label = Self.iceStateLabel(newState)
+        Task { @MainActor in
+            self.iceState = label
+            // Don't tear the session down just because ICE reports "failed" or
+            // "closed" — with a video track already flowing these can be
+            // transient; surface it in diagnostics instead of killing a stream
+            // that may still be (or resume) working.
+        }
+    }
+
+    private static func iceStateLabel(_ s: LKRTCIceConnectionState) -> String {
+        switch s {
+        case .new: return "new"
+        case .checking: return "checking"
+        case .connected: return "connected"
+        case .completed: return "completed"
+        case .failed: return "failed"
+        case .disconnected: return "disconnected"
+        case .closed: return "closed"
+        case .count: return "count"
+        @unknown default: return "unknown"
         }
     }
 
