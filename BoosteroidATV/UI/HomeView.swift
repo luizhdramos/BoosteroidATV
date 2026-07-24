@@ -81,8 +81,9 @@ struct HomeView: View {
 // palette — swap these hexes for the exact ones once provided). Centralized so
 // the header, background, and any future screens share one source of truth.
 enum BoosteroidTheme {
-    // Deep indigo/navy page background.
-    static let background = Color(red: 0.055, green: 0.05, blue: 0.16)
+    // Near-black neutral page background (~#0B0B0E) — lets the game covers pop
+    // without competing with the purple/blue brand mark.
+    static let background = Color(red: 0.043, green: 0.043, blue: 0.055)
 
     static let violet = Color(red: 0.49, green: 0.23, blue: 0.93)   // #7C3AED
     static let indigo = Color(red: 0.31, green: 0.27, blue: 0.90)   // #4F46E5
