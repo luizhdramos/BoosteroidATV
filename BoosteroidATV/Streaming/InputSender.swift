@@ -51,7 +51,14 @@ final class InputSender: InputEventHandler {
     // server accepts button/axes/pad events for that controller — see
     // BoosteroidControlChannel's header comment) and the "name" token we
     // used to correlate the server's ack back to the right local controller.
-    private var controllerIds: [ObjectIdentifier: String] = [:]
+    // CONFIRMED 2026-07-24 against Boosteroid's live catch-events.js: the
+    // gamepad `id` is a NUMBER on the wire (the client does Number(...) on it
+    // and sends `{..., "id": <number>}`). Sending it as a JSON string — as an
+    // earlier pass did — makes the server fail to match input frames to the
+    // registered controller and silently drop ALL of them (the socket still
+    // acks the connect, so it looks like it's working). Keyed as Int here so
+    // every outgoing frame serializes `id` as a number.
+    private var controllerIds: [ObjectIdentifier: Int] = [:]
     private var pendingControllerNames: [ObjectIdentifier: String] = [:]
 
     // Change-detection state, mirroring the real web client's diffing (only
@@ -116,7 +123,9 @@ final class InputSender: InputEventHandler {
             lastServerAckId = id
             if let key = pendingControllerNames.first(where: { $0.value == name })?.key {
                 // Upgrade from the provisional (index) id to the server's id.
-                controllerIds[key] = id
+                // The server sends it as a number; keep the provisional index
+                // if it somehow isn't parseable as one.
+                controllerIds[key] = Int(id) ?? controllerIds[key]
                 pendingControllerNames.removeValue(forKey: key)
             }
         case .webrtcEngineReady, .sessionActive, .controllerRumble, .raw, .closed, .failed:
@@ -178,7 +187,7 @@ final class InputSender: InputEventHandler {
         // this is the most likely value the server assigns anyway. If a real
         // controller/connected ack does come back, handleIncoming upgrades
         // controllerIds[key] to the server's id (see there).
-        controllerIds[key] = String(index)
+        controllerIds[key] = index
         connectedControllerCount = GCController.controllers().count
 
         Task { [controlChannel] in await controlChannel.send(type: "controller", action: "connected", fields: ["name": name]) }
@@ -216,7 +225,7 @@ final class InputSender: InputEventHandler {
         }
     }
 
-    private func pollGamepad(controller: GCController, id: String, pad: GCExtendedGamepad) {
+    private func pollGamepad(controller: GCController, id: Int, pad: GCExtendedGamepad) {
         let key = ObjectIdentifier(controller)
 
         // Buttons 0-9 — CONFIRMED indices, see BoosteroidControlChannel.
