@@ -80,11 +80,14 @@ struct StreamView: View {
                 // but not rendering". (Temporary; remove once video is solid.)
                 VStack {
                     HStack {
-                        Text("ICE \(controller.iceState) · conn \(controller.peerConnState) · dc \(controller.dataChannelState) · track \(controller.gotVideoTrack ? "yes" : "no") · frames \(controller.framesDecoded) · \(controller.stats.resolutionWidth)x\(controller.stats.resolutionHeight) · \(Int(controller.stats.fps))fps · \(controller.stats.bitrateKbps)kbps")
-                            .font(.caption.monospaced())
-                            .padding(8)
-                            .background(.black.opacity(0.6))
-                            .foregroundStyle(.white)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("ICE \(controller.iceState) · conn \(controller.peerConnState) · dc \(controller.dataChannelState) · track \(controller.gotVideoTrack ? "yes" : "no") · \(controller.stats.resolutionWidth)x\(controller.stats.resolutionHeight) · \(Int(controller.stats.fps))fps · \(controller.stats.bitrateKbps)kbps")
+                            Text("codec \(controller.codecName) · pkts \(controller.packetsReceived) · framesRx \(controller.framesReceived) · keyFrames \(controller.keyFramesDecoded) · framesDec \(controller.framesDecoded)")
+                        }
+                        .font(.caption.monospaced())
+                        .padding(8)
+                        .background(.black.opacity(0.6))
+                        .foregroundStyle(.white)
                         Spacer()
                     }
                     Spacer()

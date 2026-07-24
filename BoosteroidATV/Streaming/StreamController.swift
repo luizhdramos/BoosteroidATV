@@ -58,6 +58,12 @@ final class StreamController: NSObject {
     private(set) var dataChannelState: String = "-"
     private(set) var gotVideoTrack = false
     private(set) var framesDecoded = 0
+    // Extra decode diagnostics to tell "packets arriving but not assembled"
+    // from "frames assembled but not decoding" (codec/keyframe issue).
+    private(set) var framesReceived = 0
+    private(set) var keyFramesDecoded = 0
+    private(set) var packetsReceived = 0
+    private(set) var codecName = "?"
     private var lastBytesReceived = 0
 
     private var peerConnection: LKRTCPeerConnection?
@@ -363,19 +369,32 @@ final class StreamController: NSObject {
                     // thread → snapshot into immutable lets, publish on the main
                     // actor.
                     var frames = 0, bytes = 0, w = 0, h = 0
+                    var framesRx = 0, keyFrames = 0, packets = 0
                     var fps = 0.0
-                    for (_, stat) in report.statistics where stat.type == "inbound-rtp" {
+                    var codecId = ""
+                    var codecs: [String: String] = [:]
+                    for (_, stat) in report.statistics {
                         let v = stat.values
+                        if stat.type == "codec", let mime = v["mimeType"] as? String {
+                            codecs[stat.id] = mime
+                        }
+                        guard stat.type == "inbound-rtp" else { continue }
                         let kind = (v["kind"] as? String) ?? (v["mediaType"] as? String) ?? ""
                         guard kind == "video" else { continue }
                         frames = (v["framesDecoded"] as? NSNumber)?.intValue ?? frames
+                        framesRx = (v["framesReceived"] as? NSNumber)?.intValue ?? framesRx
+                        keyFrames = (v["keyFramesDecoded"] as? NSNumber)?.intValue ?? keyFrames
+                        packets = (v["packetsReceived"] as? NSNumber)?.intValue ?? packets
                         fps = (v["framesPerSecond"] as? NSNumber)?.doubleValue ?? fps
                         w = (v["frameWidth"] as? NSNumber)?.intValue ?? w
                         h = (v["frameHeight"] as? NSNumber)?.intValue ?? h
                         bytes = (v["bytesReceived"] as? NSNumber)?.intValue ?? bytes
+                        codecId = (v["codecId"] as? String) ?? codecId
                     }
                     let fFrames = frames, fBytes = bytes, fW = w, fH = h
                     let fFps = fps
+                    let fFramesRx = framesRx, fKey = keyFrames, fPackets = packets
+                    let fCodec = codecs[codecId] ?? (codecId.isEmpty ? "?" : codecId)
                     Task { @MainActor in
                         guard let self else { return }
                         let delta = max(0, fBytes - self.lastBytesReceived)
@@ -385,6 +404,10 @@ final class StreamController: NSObject {
                         self.stats.resolutionWidth = fW
                         self.stats.resolutionHeight = fH
                         self.framesDecoded = fFrames
+                        self.framesReceived = fFramesRx
+                        self.keyFramesDecoded = fKey
+                        self.packetsReceived = fPackets
+                        self.codecName = fCodec
                     }
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
