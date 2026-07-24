@@ -40,11 +40,18 @@ import Foundation
 // - `queryString` is EXACTLY `session/details`'s `data.queryString` JWT —
 //   previously fetched and stored on SessionInfo but never used for
 //   anything (see SessionInfo's doc comment, now corrected).
-// - `clientType`/`devType`/`os` are enumerated IN THE SOURCE with values
-//   that explicitly include native TV clients ("native"/"tv"/"atv") —
-//   Boosteroid already anticipates non-browser Apple TV clients at the
-//   protocol level, which is reassuring: this isn't fighting a browser-only
-//   assumption, just filling in a client nobody had written yet.
+// - `clientType` DETERMINES THE VIDEO TRANSPORT — CONFIRMED live 2026-07-23,
+//   the decisive finding: `clientType=native` makes the server stream RAW UDP
+//   (it sends `settings/udpforward` with ip/videoport/audioport and NEVER
+//   `settings/webrtc`), while `clientType=web` makes it send `settings/webrtc`
+//   and use WebRTC. Boosteroid's own bundle enumerates "native"/"tv"/"atv", so
+//   a native TV client IS anticipated — but as a RAW-UDP client, not a WebRTC
+//   one. Since this app streams via WebRTC (livekit), it must declare
+//   `clientType=web` to get the transport it actually implements. (An earlier
+//   pass used `native` on the theory that "we're a native TV app"; that was the
+//   root cause of no video — the server set us up for a UDP stream we never
+//   listen for.) Implementing the raw-UDP path instead would be a separate,
+//   much larger effort (a UDP RTP receiver keyed by the `stream/key` value).
 //
 // CONFIRMED message envelope: plain JSON TEXT frames (not binary), shape
 // `{type, action, ...fields}`. For the four "external device" types
@@ -148,9 +155,19 @@ actor BoosteroidControlChannel {
         resolutionHeight: Int,
         language: String = "en",
         refreshRate: Int = 60,
-        os: String = "atv",
-        devType: String = "tv",
-        clientType: String = "native"
+        // CONFIRMED 2026-07-23 (live, decisive): the `clientType` query param
+        // DETERMINES THE VIDEO TRANSPORT. `clientType=native` makes the server
+        // stream raw UDP (it pushes `settings/udpforward` with ip/videoport/
+        // audioport and never sends `settings/webrtc`) — a transport this app
+        // does NOT implement, which is why video never arrived. `clientType=web`
+        // makes the server send `settings/webrtc` and use the WebRTC path this
+        // app is actually built on. So we declare `web`/`desktop`/`win` to get
+        // the WebRTC transport — the app genuinely IS a WebRTC (livekit) client,
+        // it just isn't a browser. (`devType`/`os` don't affect transport in
+        // testing; kept matching the browser to stay on its known-good path.)
+        os: String = "win",
+        devType: String = "desktop",
+        clientType: String = "web"
     ) -> AsyncStream<IncomingEvent> {
         let host = nodeBaseUrl
             .replacingOccurrences(of: "https://", with: "")
