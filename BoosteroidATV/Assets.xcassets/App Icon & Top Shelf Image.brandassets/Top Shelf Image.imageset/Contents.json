@@ -1,6 +1,17 @@
 {
   "images" : [
-    { "filename" : "top_1920x720.png", "idiom" : "tv", "scale" : "1x" }
+    {
+      "filename" : "top_1920x720.png",
+      "idiom" : "tv",
+      "scale" : "1x"
+    },
+    {
+      "idiom" : "tv",
+      "scale" : "2x"
+    }
   ],
-  "info" : { "author" : "xcode", "version" : 1 }
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
 }

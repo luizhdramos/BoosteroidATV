@@ -374,10 +374,23 @@ extension StreamController: LKRTCPeerConnectionDelegate {
         }
     }
 
+   // nonisolated func peerConnection(_ peerConnection: LKRTCPeerConnection, didChange newState: LKRTCIceConnectionState) {
+     //   let label = Self.iceStateLabel(newState)
+       // Task { @MainActor in
+        //    self.iceState = label
+            // Don't tear the session down just because ICE reports "failed" or
+            // "closed" — with a video track already flowing these can be
+            // transient; surface it in diagnostics instead of killing a stream
+            // that may still be (or resume) working.
+        //}
+   // }
+    
     nonisolated func peerConnection(_ peerConnection: LKRTCPeerConnection, didChange newState: LKRTCIceConnectionState) {
-        let label = Self.iceStateLabel(newState)
         Task { @MainActor in
+            // Called safely on the MainActor
+            let label = Self.iceStateLabel(newState)
             self.iceState = label
+            
             // Don't tear the session down just because ICE reports "failed" or
             // "closed" — with a video track already flowing these can be
             // transient; surface it in diagnostics instead of killing a stream
@@ -385,7 +398,7 @@ extension StreamController: LKRTCPeerConnectionDelegate {
         }
     }
 
-    private static func iceStateLabel(_ s: LKRTCIceConnectionState) -> String {
+    nonisolated private static func iceStateLabel(_ s: LKRTCIceConnectionState) -> String {
         switch s {
         case .new: return "new"
         case .checking: return "checking"

@@ -138,33 +138,22 @@ actor BoosteroidClient {
     // you want to show the user a live number while they do.
 
     func createSession(_ request: SessionCreateRequest, cookies: [String: String]) async throws -> SessionInfo {
-        // CONFIRMED 2026-07-22: calling enqueue always creates a BRAND NEW
-        // session, even while a queued ("EN") one already exists for the
-        // same appId — the old one gets orphaned immediately (confirmed:
-        // session/details on it returns 406 "timeout" right away, not after
-        // some idle period). This broke the "start on browser, continue on
-        // the tvOS app" use case: the app's own enqueue call was creating a
-        // SECOND, competing session, surfacing as a confusing "Session
-        // timed out while waiting in queue" error. Fix: if last-session is
-        // already tracking THIS appId and still queued, attach to it
-        // instead of enqueueing again (safe — nobody has "claimed" it yet).
-        //
-        // Also attaches to an existing "LI" (already active) session, e.g.
-        // one started in a browser — explicit user decision, accepting a
-        // known risk: a same-session re-fetch of session/details was
-        // observed once to immediately 406 "timeout" AND kick the browser
-        // tab that had been streaming it back to /dashboard, consistent
-        // with a second `session/details` fetch force-ending the first
-        // claim — but this wasn't isolated from ordinary 15-minute-
-        // inactivity timeout in the time available to test, so it's
-        // unconfirmed which. If it IS the former, that's arguably correct
-        // "switch device" behavior anyway (the old device loses the stream,
-        // the new one gets it) rather than a bug — see
-        // .sessionAlreadyActiveElsewhere's history in git log if this needs
-        // to be reverted to the safer throwing behavior instead.
-        if let dto = try? await fetchLastSessionDTO(cookies: cookies), dto.data.appId == Int(request.gameId),
-           dto.data.status == "EN" || dto.data.status == "LI" {
-            return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
+        // Standalone-first (CONFIRMED 2026-07-23): the app must stream its OWN
+        // fresh session so it is the SOLE WebRTC negotiator. It must NOT "take
+        // over" a session another device is already streaming: opening our
+        // control socket on it switches devices mid-stream, and the media path
+        // does not survive that (ICE connects but zero frames arrive — the
+        // server never feeds the newly-switched peer). Enqueue always creates a
+        // brand-new session (orphaning any other), which IS the clean "switch
+        // to Apple TV" we want — the app then negotiates fresh with nobody to
+        // disrupt. The one thing we resume is our OWN still-queued ("EN")
+        // session for the same game, so re-tapping doesn't lose our place in
+        // the queue. (An earlier pass attached to "LI" sessions to "take over";
+        // that was the source of the black screen — see the control-socket
+        // switch note in BoosteroidControlChannel.)
+        if let dto = try? await fetchLastSessionDTO(cookies: cookies),
+           dto.data.appId == Int(request.gameId), dto.data.status == "EN" {
+            return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: "EN")
         }
         let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
@@ -269,23 +258,56 @@ actor BoosteroidClient {
         _ request: SessionCreateRequest,
         cookies: [String: String],
         pollIntervalNanoseconds: UInt64 = 2_000_000_000,
-        timeoutSeconds: TimeInterval = 180,
+        timeoutSeconds: TimeInterval = 600,
         onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil
     ) async throws -> SessionInfo {
+        guard let appId = Int(request.gameId) else {
+            throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Invalid game id \(request.gameId)")
+        }
         var current = try await createSession(request, cookies: cookies)
         await onPoll?(current, 0)
+        // The VM may already be ready (no queue), in which case session/details
+        // returns a gw straight away.
+        if let ready = try await detailsIfReady(sessionId: current.sessionId, cookies: cookies) {
+            return ready
+        }
+        // Otherwise wait out the queue. CONFIRMED 2026-07-23: while queued,
+        // last-session stays "EN" and session/details returns 406 "timeout"
+        // (that 406 IS the queued state for a fresh session, not an expiry);
+        // when a machine is assigned, session/details flips to 200 + gw. We
+        // poll for THAT — waiting for last-session to reach "LI" instead would
+        // deadlock, since a session only goes "LI" once a client claims it, and
+        // we don't claim (open the control socket) until after this returns.
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         var attempt = 0
-        while current.status == "EN", Date() < deadline {
+        while Date() < deadline {
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
-            current = try await pollSession(sessionId: current.sessionId, cookies: cookies)
             attempt += 1
+            guard let dto = try? await fetchLastSessionDTO(cookies: cookies), dto.data.appId == appId else {
+                continue
+            }
+            current = SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
             await onPoll?(current, attempt)
+            if let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
+                return ready
+            }
         }
-        guard current.status != "EN" else {
-            throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Queue wait exceeded \(Int(timeoutSeconds))s — queue position can rise as well as fall (even on a paid account — higher-priority sessions can still land ahead of you), so this can happen even after a long wait. Try again.")
-        }
-        return try await fetchSessionDetails(sessionId: current.sessionId, cookies: cookies)
+        throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Still waiting for a free machine after \(Int(timeoutSeconds))s. The queue can be long — try again.")
+    }
+
+    /// Returns the ready `SessionInfo` (gw + queryString) when the VM is
+    /// assigned (session/details → 200 with a gw), or nil when still queued
+    /// (406 "timeout") or transiently empty — i.e. "not ready yet, keep
+    /// waiting". Only a genuinely unexpected response throws.
+    private func detailsIfReady(sessionId: String, cookies: [String: String]) async throws -> SessionInfo? {
+        let url = URL(string: "\(apiBase)/v1/streaming/session/details?sessionId=\(sessionId)")!
+        let req = authenticatedRequest(url, cookies: cookies, method: "POST")
+        let (data, response) = try await session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 406 { return nil }                        // queued (or expired) — keep waiting
+        guard status == 200, !data.isEmpty else { return nil } // settling — keep waiting
+        guard let dto = try? JSONDecoder().decode(BoosteroidSessionDetailsSuccessDTO.self, from: data) else { return nil }
+        return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI", queryString: dto.data.queryString)
     }
 
     /// CONFIRMED URL/shape (same last-session endpoint/DTO as above). Used

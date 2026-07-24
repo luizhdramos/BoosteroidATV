@@ -155,16 +155,7 @@ actor BoosteroidControlChannel {
         resolutionHeight: Int,
         language: String = "en",
         refreshRate: Int = 60,
-        // CONFIRMED 2026-07-23 (live, decisive): the `clientType` query param
-        // DETERMINES THE VIDEO TRANSPORT. `clientType=native` makes the server
-        // stream raw UDP (it pushes `settings/udpforward` with ip/videoport/
-        // audioport and never sends `settings/webrtc`) — a transport this app
-        // does NOT implement, which is why video never arrived. `clientType=web`
-        // makes the server send `settings/webrtc` and use the WebRTC path this
-        // app is actually built on. So we declare `web`/`desktop`/`win` to get
-        // the WebRTC transport — the app genuinely IS a WebRTC (livekit) client,
-        // it just isn't a browser. (`devType`/`os` don't affect transport in
-        // testing; kept matching the browser to stay on its known-good path.)
+	
         os: String = "win",
         devType: String = "desktop",
         clientType: String = "web"
