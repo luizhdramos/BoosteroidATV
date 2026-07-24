@@ -322,14 +322,14 @@ final class StreamController: NSObject {
             }
         }
 
-        // Filter the offer to H.264 only. CONFIRMED 2026-07-23: with the raw
-        // multi-codec offer (H264 + VP8 + VP9 + AV1) the server streams packets
-        // (kbps > 0) but the client assembles 0 frames and can't identify the
-        // codec — a payload-type/codec mismatch. The server only encodes H.264
-        // (getParams = H264), so restricting the offer to H.264 removes the
-        // ambiguity and lines the PTs up the way the browser's H.264-only
-        // negotiation does.
-        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: .h264)
+        // Filter the offer to a SINGLE codec (the user's choice, default H.264).
+        // CONFIRMED 2026-07-23: with a raw multi-codec offer (H264+VP8+VP9+AV1)
+        // the server streams packets (kbps > 0) but the client assembles 0
+        // frames and can't identify the codec — a payload-type mismatch.
+        // Restricting to one codec removes the ambiguity and lines the PTs up
+        // like the browser's negotiation. preferCodec falls back to H.264 if the
+        // chosen codec isn't offered, so H.264 stays the safe path.
+        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: settings.codec)
         let finalOffer = LKRTCSessionDescription(type: .offer, sdp: mungedSdp)
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
