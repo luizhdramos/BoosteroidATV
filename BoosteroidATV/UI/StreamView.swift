@@ -35,6 +35,16 @@ struct StreamView: View {
                         ProgressView().scaleEffect(2).tint(.white)
                         Text("Connecting to \(game.title)...")
                             .foregroundStyle(.white)
+                        // Live connect stage, so a stuck session shows WHERE
+                        // it's stuck (control channel / WebRTC step) instead of
+                        // spinning silently.
+                        if !controller.stage.isEmpty {
+                            Text(controller.stage)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 80)
+                        }
                         // last-session (polled by createAndAwaitSession) is
                         // the CONFIRMED authoritative "are we still queued"
                         // signal (EN -> LI), but has no numeric position.

@@ -41,12 +41,20 @@ final class StreamController: NSObject {
     private(set) var state: StreamState = .idle
     private(set) var stats = StreamStats()
     private(set) var videoTrack: LKRTCVideoTrack?
+    /// Human-readable connect progress, shown under "Connecting…" so a stuck
+    /// session says WHERE it's stuck instead of hanging silently.
+    private(set) var stage: String = ""
+    /// Rolling log of raw control-channel messages, surfaced on failure to help
+    /// diagnose a stuck connect on a real device (no console access there).
+    private(set) var controlLog: [String] = []
 
     private var peerConnection: LKRTCPeerConnection?
     private var signaling: BoosteroidSignalingClient?
     private var inputSender: InputSender?
     private let controlChannel = BoosteroidControlChannel()
     private var controlChannelTask: Task<Void, Never>?
+    private var watchdogTasks: [Task<Void, Never>] = []
+    private var didStartWebRTC = false
     private(set) var videoView: VideoSurfaceView?
     private var statsTimer: Timer?
     private var sessionInfo: SessionInfo?
@@ -77,6 +85,9 @@ final class StreamController: NSObject {
         default: break
         }
         state = .connecting
+        stage = "Opening control channel…"
+        controlLog = []
+        didStartWebRTC = false
         sessionInfo = session
         self.settings = settings
 
@@ -117,22 +128,50 @@ final class StreamController: NSObject {
                 refreshRate: self.settings.fps
             )
             sender.start()
-            var startedWebRTC = false
+            self.stage = "Control channel open — waiting for the server to start video…"
+
+            // Fallback: the confirmed trigger is `settings/webrtc` (fresh) or a
+            // `stream/*` burst (take-over). If neither arrives in a few seconds
+            // — e.g. the server sends the go-ahead in a shape we don't
+            // recognize — start WebRTC anyway; the session is already claimed,
+            // and the REST calls will surface a clear error if it's genuinely
+            // too early rather than hanging forever.
+            self.watchdogTasks.append(Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                guard let self, !self.didStartWebRTC, self.state == .connecting else { return }
+                self.controlLog.append("(no webrtc/stream signal in 6s — starting anyway)")
+                await self.startWebRTCMedia(client: client)
+            })
+            // Overall watchdog so a stuck connect fails with context instead of
+            // spinning indefinitely.
+            self.watchdogTasks.append(Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 45_000_000_000)
+                guard let self, self.state == .connecting else { return }
+                self.state = .failed(message:
+                    "Timed out after 45s. Last step: \(self.stage)\n\nControl messages received:\n" +
+                    (self.controlLog.isEmpty ? "(none)" : self.controlLog.joined(separator: "\n")))
+            })
+
             for await event in stream {
                 // Input events (controller acks etc.) go to the sender.
                 sender.handleIncoming(event)
-                // 2. Start WebRTC media only once the control plane says so:
-                //    `settings/webrtc` on a fresh session, or the `stream/*`
-                //    burst when taking over/switching to an existing one.
                 switch event {
-                case .webrtcEngineReady, .sessionActive:
-                    if !startedWebRTC {
-                        startedWebRTC = true
-                        await self.startWebRTCMedia(client: client)
-                    }
+                case .webrtcEngineReady:
+                    self.controlLog.append("settings/webrtc (start engine)")
+                    if !self.didStartWebRTC { await self.startWebRTCMedia(client: client) }
+                case .sessionActive:
+                    self.controlLog.append("stream/* burst (session active)")
+                    if !self.didStartWebRTC { await self.startWebRTCMedia(client: client) }
+                case .raw(let type, let action):
+                    self.controlLog.append("\(type ?? "?")/\(action ?? "?")")
+                case .controllerAck(let name, _):
+                    self.controlLog.append("controller connected: \(name)")
                 case .failed(let message):
-                    if !startedWebRTC { self.state = .failed(message: "Control channel failed before streaming could start: \(message)") }
-                default:
+                    self.controlLog.append("socket failed: \(message)")
+                    if !self.didStartWebRTC {
+                        self.state = .failed(message: "Control channel failed before streaming could start: \(message)")
+                    }
+                case .closed, .controllerRumble:
                     break
                 }
             }
@@ -143,10 +182,12 @@ final class StreamController: NSObject {
     /// ICE), CONFIRMED against real traffic. Called only after the control
     /// channel signals the engine should start (see connect()).
     private func startWebRTCMedia(client: BoosteroidSignalingClient) async {
-        // Guard against a duplicate trigger racing in (webrtcEngineReady AND
-        // the stream burst can both arrive).
-        guard peerConnection == nil else { return }
+        // Guard against a duplicate trigger racing in (the signal and the
+        // fallback timer can both fire).
+        guard !didStartWebRTC else { return }
+        didStartWebRTC = true
         do {
+            stage = "Starting video — fetching ICE servers…"
             let iceServers = try await client.fetchIceServers()
             // CONFIRMED this session negotiated H.264 — getParams told us so
             // before we ever built the peer connection. TODO(protocol): decide
@@ -155,10 +196,12 @@ final class StreamController: NSObject {
             let params = try await client.fetchParams()
             print("[StreamController] Boosteroid params: codec=\(params.codec) version=\(params.version)")
 
+            stage = "Sending WebRTC offer…"
             try await createPeerConnectionAndOffer(iceServers: iceServers)
+            stage = "Offer accepted — waiting for video…"
             client.startPollingRemoteICE()
         } catch {
-            state = .failed(message: error.localizedDescription)
+            state = .failed(message: "Video setup failed while: \(stage)\n\(error.localizedDescription)")
         }
     }
 
@@ -175,6 +218,8 @@ final class StreamController: NSObject {
         inputSender = nil
         controlChannelTask?.cancel()
         controlChannelTask = nil
+        watchdogTasks.forEach { $0.cancel() }
+        watchdogTasks = []
         Task { [controlChannel] in await controlChannel.disconnect() }
         peerConnection?.close()
         peerConnection = nil
@@ -289,6 +334,9 @@ extension StreamController: LKRTCPeerConnectionDelegate {
         Task { @MainActor in
             self.videoTrack = track
             self.videoView?.videoTrack = track
+            self.watchdogTasks.forEach { $0.cancel() }
+            self.watchdogTasks = []
+            self.stage = ""
             self.state = .streaming
             self.startStatsLoop()
         }
