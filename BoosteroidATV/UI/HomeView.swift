@@ -8,43 +8,60 @@ struct HomeView: View {
     let games: [GameInfo]
     let onPlay: (GameInfo) -> Void
 
+    /// Vertical space the pinned header occupies — the grid is inset by this
+    /// so its first row starts below the header, then scrolls up UNDER it.
+    private let headerReserve: CGFloat = 124
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Fixed brand header — pinned so it no longer scrolls away with the
-            // grid (it used to be a navigationTitle inside the ScrollView).
+        ZStack(alignment: .top) {
+            BoosteroidTheme.background.ignoresSafeArea()
+
+            // Content scrolls the full height and passes behind the header.
+            ScrollView {
+                Group {
+                    if games.isEmpty {
+                        ContentUnavailableView(
+                            "No games yet",
+                            systemImage: "gamecontroller",
+                            description: Text("Boosteroid's catalog API hasn't been wired up yet.")
+                        )
+                        .padding(.top, 120)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 24)], spacing: 24) {
+                            ForEach(games) { game in
+                                Button { onPlay(game) } label: {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        coverArt(for: game)
+                                            .aspectRatio(1, contentMode: .fit)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        Text(game.title).font(.headline).lineLimit(1)
+                                    }
+                                }
+                                .buttonStyle(.card)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, headerReserve)
+                .padding(.horizontal, 40)
+                .padding(.bottom, 40)
+            }
+
+            // Fade scrim: fills with the background at the very top and fades to
+            // clear just below the header, so rows scrolling up dissolve under
+            // the pinned header instead of being cut off at a hard edge.
+            LinearGradient(
+                colors: [BoosteroidTheme.background, BoosteroidTheme.background, BoosteroidTheme.background.opacity(0)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: headerReserve + 28)
+            .frame(maxWidth: .infinity)
+            .allowsHitTesting(false)
+
+            // The pinned header itself.
             BrandHeader()
                 .padding(.horizontal, 40)
                 .padding(.top, 24)
-                .padding(.bottom, 16)
-
-            if games.isEmpty {
-                ScrollView {
-                    ContentUnavailableView(
-                        "No games yet",
-                        systemImage: "gamecontroller",
-                        description: Text("Boosteroid's catalog API hasn't been wired up yet.")
-                    )
-                    .padding(.top, 120)
-                }
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 24)], spacing: 24) {
-                        ForEach(games) { game in
-                            Button { onPlay(game) } label: {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    coverArt(for: game)
-                                        .aspectRatio(1, contentMode: .fit)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    Text(game.title).font(.headline).lineLimit(1)
-                                }
-                            }
-                            .buttonStyle(.card)
-                        }
-                    }
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 40)
-                }
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -77,6 +94,24 @@ struct HomeView: View {
     }
 }
 
+// MARK: - Theme
+//
+// Purple → indigo → blue palette (placeholder for the user's "morado y azul"
+// palette — swap these hexes for the exact ones once provided). Centralized so
+// the header, background, and any future screens share one source of truth.
+enum BoosteroidTheme {
+    // Deep indigo/navy page background.
+    static let background = Color(red: 0.055, green: 0.05, blue: 0.16)
+
+    static let violet = Color(red: 0.49, green: 0.23, blue: 0.93)   // #7C3AED
+    static let indigo = Color(red: 0.31, green: 0.27, blue: 0.90)   // #4F46E5
+    static let blue   = Color(red: 0.23, green: 0.51, blue: 0.96)   // #3B82F6
+
+    static var brandGradient: LinearGradient {
+        LinearGradient(colors: [violet, indigo, blue], startPoint: .leading, endPoint: .trailing)
+    }
+}
+
 // MARK: - Brand Header
 //
 // A pinned, drawn-in-SwiftUI wordmark (no image asset needed, so it stays
@@ -84,35 +119,26 @@ struct HomeView: View {
 // gradient wordmark. Purely decorative — not focusable — so it never steals
 // focus from the game grid.
 struct BrandHeader: View {
-    private var brandGradient: LinearGradient {
-        LinearGradient(
-            colors: [Color(red: 1.0, green: 0.45, blue: 0.2),   // orange
-                     Color(red: 0.95, green: 0.25, blue: 0.55),  // pink
-                     Color(red: 0.5, green: 0.3, blue: 0.95)],   // purple
-            startPoint: .leading, endPoint: .trailing
-        )
-    }
-
     var body: some View {
         HStack(spacing: 20) {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(brandGradient)
+                .fill(BoosteroidTheme.brandGradient)
                 .frame(width: 68, height: 68)
                 .overlay(
                     Image(systemName: "bolt.fill")
                         .font(.system(size: 34, weight: .heavy))
                         .foregroundStyle(.white)
                 )
-                .shadow(color: Color(red: 0.95, green: 0.25, blue: 0.55).opacity(0.5), radius: 16, y: 6)
+                .shadow(color: BoosteroidTheme.indigo.opacity(0.55), radius: 16, y: 6)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Boosteroid")
                     .font(.system(size: 46, weight: .heavy, design: .rounded))
-                    .foregroundStyle(brandGradient)
+                    .foregroundStyle(BoosteroidTheme.brandGradient)
                 Text("CLOUD GAMING ON APPLE TV")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .tracking(4)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.55))
             }
 
             Spacer(minLength: 0)
