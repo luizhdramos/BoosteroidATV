@@ -137,6 +137,9 @@ actor BoosteroidControlChannel {
     private let session = URLSession(configuration: .ephemeral)
     private var idCmdCounter: Int = 0
     private var statusFramerate: Int = 60
+    /// Max bitrate in bits/sec, sent to the server as `stream/bandwidth` right
+    /// after the status handshake. 0 = don't send (let the server default).
+    private var statusBandwidthBps: Int = 0
     private(set) var isOpen = false
 
     /// CONFIRMED array literal from `SessionHandler.sendEvents` — these four
@@ -158,9 +161,11 @@ actor BoosteroidControlChannel {
 	
         os: String = "win",
         devType: String = "desktop",
-        clientType: String = "web"
+        clientType: String = "web",
+        maxBitrateBps: Int = 0
     ) -> AsyncStream<IncomingEvent> {
         statusFramerate = refreshRate
+        statusBandwidthBps = maxBitrateBps
         let host = nodeBaseUrl
             .replacingOccurrences(of: "https://", with: "")
             .replacingOccurrences(of: "http://", with: "")
@@ -313,6 +318,13 @@ actor BoosteroidControlChannel {
             ],
         ])
         await send(type: "stream", action: "refreshRate", fields: ["value": statusFramerate])
+        // CONFIRMED 2026-07-24 from streaming.js: the max bitrate is set with a
+        // separate `{type:"stream",action:"bandwidth",value:<bps>}` message
+        // (bits/sec), not via SDP. The web client picks a resolution-based
+        // default (its "automatic" mode) or the user's manual value.
+        if statusBandwidthBps > 0 {
+            await send(type: "stream", action: "bandwidth", fields: ["value": statusBandwidthBps])
+        }
     }
 
     private static func stringValue(_ value: Any?) -> String? {

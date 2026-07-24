@@ -91,31 +91,27 @@ struct StreamView: View {
         .onDisappear { controller.disconnect() }
     }
 
-    /// Small top-left performance overlay: Stream FPS (frames arriving from
-    /// the server), Decode FPS (frames decoded locally), Latency (network
-    /// RTT), and active codec + bitrate.
+    /// Discreet single-line performance overlay pinned to the top-left edge:
+    /// "Bitrate: 2.3 Mbps | Stream FPS: 120 | Latency: 13ms". Codec is omitted
+    /// (Apple TV only ever gets H.264).
     private var statsOverlay: some View {
-        let kbps = controller.stats.bitrateKbps
-        let rate = kbps >= 1000 ? String(format: "%.1f Mbps", Double(kbps) / 1000) : "\(kbps) kbps"
-        let codec = controller.codecName == "?" ? "—" : controller.codecName
+        let mbps = Double(controller.stats.bitrateKbps) / 1000
+        let line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps  |  Stream FPS: \(controller.streamFps)  |  Latency: \(controller.rttMs)ms"
         return VStack {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Stream \(controller.streamFps) fps")
-                    Text("Decode \(controller.decodeFps) fps")
-                    Text("Latency \(controller.rttMs) ms")
-                    Text("\(codec) · \(rate)")
-                }
-                .font(.system(size: 20, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+                Text(line)
+                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .shadow(color: .black.opacity(0.8), radius: 2, x: 0, y: 1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.black.opacity(0.35), in: Capsule())
                 Spacer()
             }
             Spacer()
         }
-        .padding(40)
+        .padding(.top, 8)
+        .padding(.leading, 8)
         .allowsHitTesting(false)
     }
 

@@ -29,6 +29,32 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Section("Bitrate") {
+                    Toggle("Automatic bitrate", isOn: $viewModel.streamSettings.automaticBitrate)
+                    if !viewModel.streamSettings.automaticBitrate {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Max bitrate")
+                                Spacer()
+                                Text("\(viewModel.streamSettings.manualBitrateMbps) Mbps")
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                            Slider(
+                                value: Binding(
+                                    get: { Double(viewModel.streamSettings.manualBitrateMbps) },
+                                    set: { viewModel.streamSettings.manualBitrateMbps = Int($0.rounded()) }
+                                ),
+                                in: 3...80, step: 1
+                            )
+                        }
+                    }
+                    Text(viewModel.streamSettings.automaticBitrate
+                         ? "Bitrate is chosen automatically from your resolution, like the official Boosteroid client."
+                         : "Manually cap the stream bitrate between 3 and 80 Mbps.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Controller") {
                     HStack {
                         Text("Deadzone: \(Int(viewModel.streamSettings.controllerDeadzone * 100))%")

@@ -8,6 +8,12 @@ nonisolated struct StreamSettings: Codable, Equatable {
     var maxBitrateKbps: Int = 20_000 { didSet { maxBitrateKbps = min(maxBitrateKbps, 100_000) } }
     var codec: VideoCodec = .h264
     var micEnabled: Bool = false
+    /// Bitrate control. When automatic, the max bitrate is derived from the
+    /// resolution (mirroring Boosteroid's own resolution→bitrate ladder). When
+    /// off, `manualBitrateMbps` (3–80 Mbps, like the official client) is used.
+    /// Sent to the server as `stream/bandwidth` in bps.
+    var automaticBitrate: Bool = true
+    var manualBitrateMbps: Int = 20 { didSet { manualBitrateMbps = min(80, max(3, manualBitrateMbps)) } }
     /// Radial deadzone applied to analog stick axes (0.0–1.0). Default 15%.
     var controllerDeadzone: Double = 0.15
     /// Show the in-stream performance overlay (Stream/Decode FPS, latency,

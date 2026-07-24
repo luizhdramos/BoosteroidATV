@@ -170,7 +170,8 @@ final class StreamController: NSObject {
                 queryString: queryString,
                 resolutionWidth: width,
                 resolutionHeight: height,
-                refreshRate: self.settings.fps
+                refreshRate: self.settings.fps,
+                maxBitrateBps: Self.targetBitrateBps(settings: self.settings, width: width, height: height)
             )
             sender.start()
             self.stage = "Control channel open — waiting for the server to start video…"
@@ -254,6 +255,25 @@ final class StreamController: NSObject {
         let parts = resolution.split(separator: "x")
         guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]) else { return (1920, 1080) }
         return (w, h)
+    }
+
+    /// Max bitrate (bits/sec) to request via the control channel's
+    /// `stream/bandwidth` message. Manual: the user's 3–80 Mbps choice.
+    /// Automatic: Boosteroid's own resolution→bitrate ladder (CONFIRMED
+    /// 2026-07-24 from streaming.js: <0.9MP 7 / <1.0MP 10 / <1.2MP 14 /
+    /// <1.5MP 17 / <1.9MP 20 / ≥1.9MP 24 Mbps).
+    static func targetBitrateBps(settings: StreamSettings, width: Int, height: Int) -> Int {
+        if !settings.automaticBitrate {
+            return min(80, max(3, settings.manualBitrateMbps)) * 1_000_000
+        }
+        switch width * height {
+        case ..<900_000:   return 7_000_000
+        case ..<1_000_000: return 10_000_000
+        case ..<1_200_000: return 14_000_000
+        case ..<1_500_000: return 17_000_000
+        case ..<1_900_000: return 20_000_000
+        default:           return 24_000_000
+        }
     }
 
     func disconnect() {
