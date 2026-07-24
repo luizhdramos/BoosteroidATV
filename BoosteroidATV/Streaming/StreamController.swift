@@ -322,13 +322,15 @@ final class StreamController: NSObject {
             }
         }
 
-        // Send the RAW offer (no codec filtering / bandwidth injection). The
-        // browser sends its offer essentially untouched (all H264 PTs + rtx +
-        // flexfec), and Boosteroid's server only encodes H264 anyway (getParams
-        // = H264), so filtering here is unnecessary and is the last remaining
-        // difference from the browser's working offer while chasing frames-0.
-        // SDPMunger is kept in the tree in case a codec choice is needed later.
-        let finalOffer = offer
+        // Filter the offer to H.264 only. CONFIRMED 2026-07-23: with the raw
+        // multi-codec offer (H264 + VP8 + VP9 + AV1) the server streams packets
+        // (kbps > 0) but the client assembles 0 frames and can't identify the
+        // codec — a payload-type/codec mismatch. The server only encodes H.264
+        // (getParams = H264), so restricting the offer to H.264 removes the
+        // ambiguity and lines the PTs up the way the browser's H.264-only
+        // negotiation does.
+        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: .h264)
+        let finalOffer = LKRTCSessionDescription(type: .offer, sdp: mungedSdp)
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             pc.setLocalDescription(finalOffer) { error in
