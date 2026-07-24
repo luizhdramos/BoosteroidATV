@@ -137,6 +137,7 @@ actor BoosteroidControlChannel {
     private var task: URLSessionWebSocketTask?
     private let session = URLSession(configuration: .ephemeral)
     private var idCmdCounter: Int = 0
+    private var statusFramerate: Int = 60
     private(set) var isOpen = false
 
     /// CONFIRMED array literal from `SessionHandler.sendEvents` — these four
@@ -160,6 +161,7 @@ actor BoosteroidControlChannel {
         devType: String = "desktop",
         clientType: String = "web"
     ) -> AsyncStream<IncomingEvent> {
+        statusFramerate = refreshRate
         let host = nodeBaseUrl
             .replacingOccurrences(of: "https://", with: "")
             .replacingOccurrences(of: "http://", with: "")
@@ -222,10 +224,10 @@ actor BoosteroidControlChannel {
                 let message = try await task.receive()
                 switch message {
                 case .string(let text):
-                    Self.handle(text: text, continuation: continuation)
+                    await handle(text: text, continuation: continuation)
                 case .data(let data):
                     if let text = String(data: data, encoding: .utf8) {
-                        Self.handle(text: text, continuation: continuation)
+                        await handle(text: text, continuation: continuation)
                     }
                 @unknown default:
                     break
@@ -246,7 +248,7 @@ actor BoosteroidControlChannel {
     /// messages. For `type:"controller", action:"connected"` the server
     /// echoes back the client's own `name` with an added `id` — that's the
     /// controller-connect handshake ack InputSender waits for.
-    private static func handle(text: String, continuation: AsyncStream<IncomingEvent>.Continuation) {
+    private func handle(text: String, continuation: AsyncStream<IncomingEvent>.Continuation) async {
         guard let data = text.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }
@@ -273,11 +275,45 @@ actor BoosteroidControlChannel {
             continuation.yield(.webrtcEngineReady)
             return
         }
+        // CONFIRMED 2026-07-23 (THE frames-0 fix): after the WebRTC peer
+        // connects, the server sends `{"type":"stream","action":"getstatus"}`
+        // and WAITS for the client's readiness reply before it starts sending
+        // video. The web client answers with keyboard/language + a
+        // stream/status:ok (carrying client params). Without this the peer
+        // stays fully connected but 0 bytes ever arrive. Reply here.
+        if type == "stream", action == "getstatus" {
+            await sendStatusHandshake()
+            continuation.yield(.sessionActive)
+            return
+        }
         if type == "stream" {
             continuation.yield(.sessionActive)
             return
         }
         continuation.yield(.raw(type: type, action: action))
+    }
+
+    /// Replies to the server's `stream/getstatus` with the readiness handshake
+    /// the web client sends — this is what makes the server actually start
+    /// pushing video (see the getstatus note in handle()).
+    private func sendStatusHandshake() async {
+        await send(type: "keyboard", action: "language", fields: ["code": 1033]) // 1033 = en-US LCID
+        await send(type: "stream", action: "status", fields: [
+            "value": "ok",
+            "params": [
+                "type": "web",
+                "ver": "v_7.4.17",
+                "gpu": "Apple, Apple TV",
+                "proto": 1,
+                "framerate_max": statusFramerate,
+                "cursor_zip": false,
+                "filler": false,
+                "beta": 0,
+                "rtcEngine": "webrtc",
+                "rtcAudio": "pcm",
+            ],
+        ])
+        await send(type: "stream", action: "refreshRate", fields: ["value": statusFramerate])
     }
 
     private static func stringValue(_ value: Any?) -> String? {
