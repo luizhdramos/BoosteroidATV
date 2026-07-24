@@ -64,51 +64,91 @@ struct LoginView: View {
     // truncated to ~500 characters. Recommend a link instead: the user saves
     // the export to a file (iCloud Drive, a Gist, paste.ee, ...), and only
     // has to type/paste a short URL here, which the app downloads itself.
+    // Wrapped in a ScrollView, top-aligned: on a real Apple TV the full
+    // step-by-step + field + buttons is taller than the screen, and a plain
+    // centered VStack clipped the title and steps off the top edge — leaving
+    // only the text field visible. The ScrollView keeps everything reachable
+    // (tvOS auto-scrolls to whatever is focused).
     private var manualCookieEntry: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            Text("Sign in on another device")
-                .font(.title.weight(.semibold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 32) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Sign in on another device")
+                        .font(.title.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text("tvOS can't show Boosteroid's login page, so log in elsewhere and bring the cookies here.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+
+                cookieGuide
+
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Paste the Raw cookie URL (or the cookie text itself)", text: $cookieInput)
+                        .font(.caption.monospaced())
+
+                    // Diagnostic: confirms whether the paste actually landed in
+                    // the field in full, independent of whether it later parses
+                    // — tvOS's remote-driven text input has been unreliable with
+                    // very long pasted values in earlier testing.
+                    Text("\(cookieInput.count) characters entered")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 24) {
+                    Button("Sign In") { authManager.submitCookieHeader(cookieInput) }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                        .disabled(cookieInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Cancel") { authManager.cancelLogin() }
+                        .buttonStyle(.bordered)
+                        .tint(.gray)
+                }
+            }
+            .padding(80)
+            .frame(maxWidth: 1100, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // Mini step-by-step for getting the raw cookie export, in a distinct card
+    // so it reads as a guide rather than blending into the rest of the screen.
+    private var cookieGuide: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("How to get your cookies", systemImage: "list.number")
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 instructionRow(number: 1, text: "On your phone or computer, open \(BoosteroidAuth.loginStartUrl) and log in.")
-                instructionRow(number: 2, text: "Install the free \"Cookie-Editor\" browser extension, open it on cloud.boosteroid.com, and use Export → JSON.")
-                instructionRow(number: 3, text: "Recommended: paste that JSON into a new GitHub Gist (gist.github.com — can be secret), click the file's \"Raw\" button, and paste that Raw URL below. (iCloud Drive/Dropbox share links don't work here — they return a web page, not the raw file.)")
-                instructionRow(number: 4, text: "Select Sign In.")
+                instructionRow(number: 2, text: "Add the free \"Cookie-Editor\" browser extension (Chrome, Edge, or Firefox) and open it while you're on cloud.boosteroid.com.")
+                instructionRow(number: 3, text: "In Cookie-Editor, tap the Export button and choose \"Export as JSON\" — it copies all your cookies to the clipboard.")
+                instructionRow(number: 4, text: "Go to gist.github.com, paste the JSON into a new gist, and create it (a secret gist is fine).")
+                instructionRow(number: 5, text: "Open the gist, click the \"Raw\" button, then copy the URL from your browser's address bar.")
+                instructionRow(number: 6, text: "Paste that Raw URL into the field below and select Sign In.")
             }
             .font(.body)
             .foregroundStyle(.secondary)
 
-            TextField("Paste a link to your cookie file, or the cookie text itself", text: $cookieInput)
-                .font(.caption.monospaced())
-
-            // Diagnostic: confirms whether the paste actually landed in the
-            // field at all/in full, independent of whether it later parses —
-            // tvOS's remote-driven text input has been unreliable with very
-            // long pasted values in earlier testing.
-            Text("\(cookieInput.count) characters entered")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 24) {
-                Button("Sign In") { authManager.submitCookieHeader(cookieInput) }
-                    .buttonStyle(.bordered)
-                    .tint(.orange)
-                    .disabled(cookieInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("Cancel") { authManager.cancelLogin() }
-                    .buttonStyle(.bordered)
-                    .tint(.gray)
-            }
+            Label("iCloud Drive / Dropbox share links won't work — they return a web page, not the raw file. Use a Gist \"Raw\" link.", systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(.yellow)
+                .padding(.top, 4)
         }
-        .padding(80)
-        .frame(maxWidth: 1100, alignment: .leading)
+        .padding(28)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func instructionRow(number: Int, text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(number).")
-                .fontWeight(.semibold)
+        HStack(alignment: .top, spacing: 14) {
+            Text("\(number)")
+                .font(.body.weight(.bold))
+                .foregroundStyle(.orange)
+                .frame(width: 32, height: 32)
+                .background(.orange.opacity(0.15), in: Circle())
             Text(text)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
