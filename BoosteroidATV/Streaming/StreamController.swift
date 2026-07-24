@@ -64,7 +64,15 @@ final class StreamController: NSObject {
     private(set) var keyFramesDecoded = 0
     private(set) var packetsReceived = 0
     private(set) var codecName = "?"
+    // Per-second rates for the overlay: Stream FPS = frames arriving from the
+    // server, Decode FPS = frames the local hardware decodes, RTT = network
+    // round-trip. Computed as deltas across the ~1s stats tick.
+    private(set) var streamFps = 0
+    private(set) var decodeFps = 0
+    private(set) var rttMs = 0
     private var lastBytesReceived = 0
+    private var lastFramesReceivedSample = 0
+    private var lastFramesDecodedSample = 0
     // Controller input diagnostics (mirrored from InputSender each stats tick)
     // so the HUD can show whether a pad is seen, whether frames are being
     // sent, and whether the server acked the controller handshake.
@@ -386,10 +394,17 @@ final class StreamController: NSObject {
                 var fps = 0.0
                 var codecId = ""
                 var codecs: [String: String] = [:]
+                var rttSeconds: Double = -1
                 for (_, stat) in report.statistics {
                     let v = stat.values
                     if stat.type == "codec", let mime = v["mimeType"] as? String {
                         codecs[stat.id] = mime
+                    }
+                    // Network RTT from the active ICE candidate pair.
+                    if stat.type == "candidate-pair",
+                       (v["nominated"] as? NSNumber)?.boolValue == true || (v["state"] as? String) == "succeeded",
+                       let rtt = (v["currentRoundTripTime"] as? NSNumber)?.doubleValue {
+                        rttSeconds = rtt
                     }
                     guard stat.type == "inbound-rtp" else { continue }
                     let kind = (v["kind"] as? String) ?? (v["mediaType"] as? String) ?? ""
@@ -415,6 +430,14 @@ final class StreamController: NSObject {
                 self.keyFramesDecoded = keyFrames
                 self.packetsReceived = packets
                 self.codecName = codecs[codecId] ?? (codecId.isEmpty ? "?" : codecId)
+
+                // Per-second rates (tick is ~1s): frames received from the
+                // server vs. frames decoded locally.
+                self.streamFps = max(0, framesRx - self.lastFramesReceivedSample)
+                self.decodeFps = max(0, frames - self.lastFramesDecodedSample)
+                self.lastFramesReceivedSample = framesRx
+                self.lastFramesDecodedSample = frames
+                if rttSeconds >= 0 { self.rttMs = Int((rttSeconds * 1000).rounded()) }
 
                 if let sender = self.inputSender {
                     self.controllerCount = sender.connectedControllerCount

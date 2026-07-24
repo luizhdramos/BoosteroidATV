@@ -45,6 +45,12 @@ struct SettingsView: View {
                         }
                     }
                 }
+                Section("Overlay") {
+                    Toggle("Performance overlay", isOn: $viewModel.streamSettings.showStatsOverlay)
+                    Text("Shows Stream FPS, Decode FPS, latency and codec/bitrate while playing. Off by default.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Account") {
                     Button("Sign Out", role: .destructive) { authManager.logout() }
                 }

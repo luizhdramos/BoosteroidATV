@@ -10,6 +10,9 @@ nonisolated struct StreamSettings: Codable, Equatable {
     var micEnabled: Bool = false
     /// Radial deadzone applied to analog stick axes (0.0–1.0). Default 15%.
     var controllerDeadzone: Double = 0.15
+    /// Show the in-stream performance overlay (Stream/Decode FPS, latency,
+    /// codec & bitrate). Off by default; toggled in Settings.
+    var showStatsOverlay: Bool = false
 }
 
 nonisolated enum VideoCodec: String, Codable, CaseIterable {

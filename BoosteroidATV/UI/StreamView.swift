@@ -74,26 +74,10 @@ struct StreamView: View {
             case .streaming:
                 VideoSurfaceViewRepresentable(streamController: controller, showOverlay: showOverlay, onMenu: { showOverlay.toggle() })
                     .ignoresSafeArea()
-                // Always-on diagnostic HUD: if the screen is black, this says
-                // whether ICE connected, a video track arrived, and frames are
-                // decoding — so we can tell "media not arriving" from "arriving
-                // but not rendering". (Temporary; remove once video is solid.)
-                VStack {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("ICE \(controller.iceState) · conn \(controller.peerConnState) · dc \(controller.dataChannelState) · track \(controller.gotVideoTrack ? "yes" : "no") · \(controller.stats.resolutionWidth)x\(controller.stats.resolutionHeight) · \(Int(controller.stats.fps))fps · \(controller.stats.bitrateKbps)kbps")
-                            Text("codec \(controller.codecName) · pkts \(controller.packetsReceived) · framesRx \(controller.framesReceived) · keyFrames \(controller.keyFramesDecoded) · framesDec \(controller.framesDecoded)")
-                            Text("pad \(controller.controllerCount) · sent \(controller.controllerEventsSent) · ack \(controller.controllerAckId)")
-                        }
-                        .font(.caption.monospaced())
-                        .padding(8)
-                        .background(.black.opacity(0.6))
-                        .foregroundStyle(.white)
-                        Spacer()
-                    }
-                    Spacer()
+                // Compact performance overlay — only when enabled in Settings.
+                if settings.showStatsOverlay {
+                    statsOverlay
                 }
-                .padding(24)
                 if showOverlay {
                     overlay
                 }
@@ -105,6 +89,34 @@ struct StreamView: View {
         }
         .task { await start() }
         .onDisappear { controller.disconnect() }
+    }
+
+    /// Small top-left performance overlay: Stream FPS (frames arriving from
+    /// the server), Decode FPS (frames decoded locally), Latency (network
+    /// RTT), and active codec + bitrate.
+    private var statsOverlay: some View {
+        let kbps = controller.stats.bitrateKbps
+        let rate = kbps >= 1000 ? String(format: "%.1f Mbps", Double(kbps) / 1000) : "\(kbps) kbps"
+        let codec = controller.codecName == "?" ? "—" : controller.codecName
+        return VStack {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Stream \(controller.streamFps) fps")
+                    Text("Decode \(controller.decodeFps) fps")
+                    Text("Latency \(controller.rttMs) ms")
+                    Text("\(codec) · \(rate)")
+                }
+                .font(.system(size: 20, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(40)
+        .allowsHitTesting(false)
     }
 
     private var overlay: some View {
