@@ -56,6 +56,12 @@ final class StreamController: NSObject {
     private var lastBytesReceived = 0
 
     private var peerConnection: LKRTCPeerConnection?
+    /// CONFIRMED 2026-07-23: Boosteroid's webrtcstreamer.js always creates a
+    /// "ClientDataChannel" and includes it (m=application) in the SDP offer.
+    /// The app omitted it, and the server appears to gate video on it (peer
+    /// connects and a track arrives, but 0 frames decode). Retained so it
+    /// isn't deallocated.
+    private var clientDataChannel: LKRTCDataChannel?
     private var signaling: BoosteroidSignalingClient?
     private var inputSender: InputSender?
     private let controlChannel = BoosteroidControlChannel()
@@ -228,6 +234,8 @@ final class StreamController: NSObject {
         watchdogTasks.forEach { $0.cancel() }
         watchdogTasks = []
         Task { [controlChannel] in await controlChannel.disconnect() }
+        clientDataChannel?.close()
+        clientDataChannel = nil
         peerConnection?.close()
         peerConnection = nil
         signaling?.disconnect()
@@ -276,6 +284,12 @@ final class StreamController: NSObject {
             throw StreamControllerError.peerConnectionCreationFailed
         }
         peerConnection = pc
+
+        // Create the "ClientDataChannel" BEFORE the offer so it appears as an
+        // m=application line — matching Boosteroid's own webrtcstreamer.js
+        // (which the server appears to require before it starts sending video).
+        let dcConfig = LKRTCDataChannelConfiguration()
+        clientDataChannel = pc.dataChannel(forLabel: "ClientDataChannel", configuration: dcConfig)
 
         let offerConstraints = LKRTCMediaConstraints(
             mandatoryConstraints: ["OfferToReceiveVideo": "true", "OfferToReceiveAudio": "true"],
