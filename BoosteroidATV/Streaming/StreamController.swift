@@ -311,18 +311,22 @@ final class StreamController: NSObject {
             }
         }
 
-        var offerSdp = SDPMunger.preferCodec(offer.sdp, codec: settings.codec)
-        offerSdp = SDPMunger.injectBandwidth(offerSdp, videoKbps: settings.maxBitrateKbps)
-        let mungedOffer = LKRTCSessionDescription(type: .offer, sdp: offerSdp)
+        // Send the RAW offer (no codec filtering / bandwidth injection). The
+        // browser sends its offer essentially untouched (all H264 PTs + rtx +
+        // flexfec), and Boosteroid's server only encodes H264 anyway (getParams
+        // = H264), so filtering here is unnecessary and is the last remaining
+        // difference from the browser's working offer while chasing frames-0.
+        // SDPMunger is kept in the tree in case a codec choice is needed later.
+        let finalOffer = offer
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            pc.setLocalDescription(mungedOffer) { error in
+            pc.setLocalDescription(finalOffer) { error in
                 if let error { cont.resume(throwing: error) } else { cont.resume() }
             }
         }
 
         guard let signaling else { throw StreamControllerError.noSDP }
-        let answerSdp = try await signaling.sendOffer(sdp: mungedOffer.sdp)
+        let answerSdp = try await signaling.sendOffer(sdp: finalOffer.sdp)
         let remoteDesc = LKRTCSessionDescription(type: .answer, sdp: answerSdp)
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             pc.setRemoteDescription(remoteDesc) { error in
@@ -345,10 +349,11 @@ final class StreamController: NSObject {
     private func startStatsLoop() {
         statsTimer?.invalidate()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.peerConnection?.statistics { [weak self] report in
+            guard let self, let pc = self.peerConnection else { return }
+            pc.statistics { [weak self] report in
                 // Parse the standard WebRTC inbound-rtp video stats. Runs on a
-                // WebRTC thread, so hop back to the main actor to publish.
+                // WebRTC thread, so snapshot into immutable lets and hop to the
+                // main actor to publish (avoids capturing mutable vars).
                 var frames = 0, bytes = 0, w = 0, h = 0
                 var fps = 0.0
                 for (_, stat) in report.statistics where stat.type == "inbound-rtp" {
@@ -361,15 +366,17 @@ final class StreamController: NSObject {
                     h = (v["frameHeight"] as? NSNumber)?.intValue ?? h
                     bytes = (v["bytesReceived"] as? NSNumber)?.intValue ?? bytes
                 }
+                let fFrames = frames, fBytes = bytes, fW = w, fH = h
+                let fFps = fps
                 Task { @MainActor in
                     guard let self else { return }
-                    let delta = max(0, bytes - self.lastBytesReceived)
-                    self.lastBytesReceived = bytes
+                    let delta = max(0, fBytes - self.lastBytesReceived)
+                    self.lastBytesReceived = fBytes
                     self.stats.bitrateKbps = delta * 8 / 1000
-                    self.stats.fps = fps
-                    self.stats.resolutionWidth = w
-                    self.stats.resolutionHeight = h
-                    self.framesDecoded = frames
+                    self.stats.fps = fFps
+                    self.stats.resolutionWidth = fW
+                    self.stats.resolutionHeight = fH
+                    self.framesDecoded = fFrames
                 }
             }
         }
