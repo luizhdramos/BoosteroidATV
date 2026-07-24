@@ -322,18 +322,22 @@ final class StreamController: NSObject {
             }
         }
 
-        // Filter the offer to a SINGLE codec (the user's choice, default H.264).
+        // Filter the offer to a SINGLE codec.
         // CONFIRMED 2026-07-23: with a raw multi-codec offer (H264+VP8+VP9+AV1)
         // the server streams packets (kbps > 0) but the client assembles 0
         // frames and can't identify the codec — a payload-type mismatch.
         // Restricting to one codec removes the ambiguity and lines the PTs up
-        // like the browser's negotiation. preferCodec falls back to H.264 if the
-        // chosen codec isn't offered, so H.264 stays the safe path.
-        // Hardcoded H.264: it's the only codec that works on Apple TV +
-        // Boosteroid (Boosteroid streams only H.264/AV1; Apple TV can't decode
-        // AV1 and Boosteroid doesn't offer H.265). Also guards against a stale
-        // saved codec from an older build.
-        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: .h264)
+        // like the browser's negotiation.
+        //
+        // Codec choice: the user's setting, but AV1 is force-mapped to H.264
+        // (no Apple TV can decode AV1). H.265/HEVC is EXPERIMENTAL: Apple TV
+        // decodes HEVC in hardware and our libwebrtc offer can advertise it,
+        // but Boosteroid only encodes HEVC over its native UDP transport — its
+        // WebRTC path historically offered only H.264/AV1. preferCodec falls
+        // back to H.264 automatically if HEVC isn't actually in the offer, so
+        // selecting it is safe: worst case you simply get H.264.
+        let requestedCodec: VideoCodec = (self.settings.codec == .av1) ? .h264 : self.settings.codec
+        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: requestedCodec)
         let finalOffer = LKRTCSessionDescription(type: .offer, sdp: mungedSdp)
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -370,52 +374,46 @@ final class StreamController: NSObject {
                 guard let self, let pc = self.peerConnection else { return }
                 self.peerConnState = Self.peerStateLabel(pc.connectionState)
                 self.dataChannelState = Self.dcStateLabel(self.clientDataChannel?.readyState)
-                pc.statistics { [weak self] report in
-                    // Parse standard inbound-rtp video stats. Runs on a WebRTC
-                    // thread → snapshot into immutable lets, publish on the main
-                    // actor.
-                    var frames = 0, bytes = 0, w = 0, h = 0
-                    var framesRx = 0, keyFrames = 0, packets = 0
-                    var fps = 0.0
-                    var codecId = ""
-                    var codecs: [String: String] = [:]
-                    for (_, stat) in report.statistics {
-                        let v = stat.values
-                        if stat.type == "codec", let mime = v["mimeType"] as? String {
-                            codecs[stat.id] = mime
-                        }
-                        guard stat.type == "inbound-rtp" else { continue }
-                        let kind = (v["kind"] as? String) ?? (v["mediaType"] as? String) ?? ""
-                        guard kind == "video" else { continue }
-                        frames = (v["framesDecoded"] as? NSNumber)?.intValue ?? frames
-                        framesRx = (v["framesReceived"] as? NSNumber)?.intValue ?? framesRx
-                        keyFrames = (v["keyFramesDecoded"] as? NSNumber)?.intValue ?? keyFrames
-                        packets = (v["packetsReceived"] as? NSNumber)?.intValue ?? packets
-                        fps = (v["framesPerSecond"] as? NSNumber)?.doubleValue ?? fps
-                        w = (v["frameWidth"] as? NSNumber)?.intValue ?? w
-                        h = (v["frameHeight"] as? NSNumber)?.intValue ?? h
-                        bytes = (v["bytesReceived"] as? NSNumber)?.intValue ?? bytes
-                        codecId = (v["codecId"] as? String) ?? codecId
+
+                // Async getStats — no completion closure, so no nested Task and
+                // nothing captured off the main actor. Parse the standard
+                // inbound-rtp video stats inline.
+                let report = await pc.statistics()
+                var frames = 0, bytes = 0, w = 0, h = 0
+                var framesRx = 0, keyFrames = 0, packets = 0
+                var fps = 0.0
+                var codecId = ""
+                var codecs: [String: String] = [:]
+                for (_, stat) in report.statistics {
+                    let v = stat.values
+                    if stat.type == "codec", let mime = v["mimeType"] as? String {
+                        codecs[stat.id] = mime
                     }
-                    let fFrames = frames, fBytes = bytes, fW = w, fH = h
-                    let fFps = fps
-                    let fFramesRx = framesRx, fKey = keyFrames, fPackets = packets
-                    let fCodec = codecs[codecId] ?? (codecId.isEmpty ? "?" : codecId)
-                    Task { @MainActor in
-                        guard let self else { return }
-                        let delta = max(0, fBytes - self.lastBytesReceived)
-                        self.lastBytesReceived = fBytes
-                        self.stats.bitrateKbps = delta * 8 / 1000
-                        self.stats.fps = fFps
-                        self.stats.resolutionWidth = fW
-                        self.stats.resolutionHeight = fH
-                        self.framesDecoded = fFrames
-                        self.framesReceived = fFramesRx
-                        self.keyFramesDecoded = fKey
-                        self.packetsReceived = fPackets
-                        self.codecName = fCodec
-                    }
+                    guard stat.type == "inbound-rtp" else { continue }
+                    let kind = (v["kind"] as? String) ?? (v["mediaType"] as? String) ?? ""
+                    guard kind == "video" else { continue }
+                    frames = (v["framesDecoded"] as? NSNumber)?.intValue ?? frames
+                    framesRx = (v["framesReceived"] as? NSNumber)?.intValue ?? framesRx
+                    keyFrames = (v["keyFramesDecoded"] as? NSNumber)?.intValue ?? keyFrames
+                    packets = (v["packetsReceived"] as? NSNumber)?.intValue ?? packets
+                    fps = (v["framesPerSecond"] as? NSNumber)?.doubleValue ?? fps
+                    w = (v["frameWidth"] as? NSNumber)?.intValue ?? w
+                    h = (v["frameHeight"] as? NSNumber)?.intValue ?? h
+                    bytes = (v["bytesReceived"] as? NSNumber)?.intValue ?? bytes
+                    codecId = (v["codecId"] as? String) ?? codecId
                 }
+                let delta = max(0, bytes - self.lastBytesReceived)
+                self.lastBytesReceived = bytes
+                self.stats.bitrateKbps = delta * 8 / 1000
+                self.stats.fps = fps
+                self.stats.resolutionWidth = w
+                self.stats.resolutionHeight = h
+                self.framesDecoded = frames
+                self.framesReceived = framesRx
+                self.keyFramesDecoded = keyFrames
+                self.packetsReceived = packets
+                self.codecName = codecs[codecId] ?? (codecId.isEmpty ? "?" : codecId)
+
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
