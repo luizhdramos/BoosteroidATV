@@ -152,8 +152,13 @@ actor BoosteroidClient {
         // that was the source of the black screen — see the control-socket
         // switch note in BoosteroidControlChannel.)
         if let dto = try? await fetchLastSessionDTO(cookies: cookies),
-           dto.data.appId == Int(request.gameId), dto.data.status == "EN" {
-            return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: "EN")
+           dto.data.appId == Int(request.gameId),
+           dto.data.status == "EN" || dto.data.status == "LI" {
+            // Recover the existing session for this game (queued OR live) rather
+            // than enqueueing a competing one — re-launching should resume the
+            // same sessionId, and taking over a live session (moving it to the
+            // Apple TV) is the intended handoff, not a fresh queue.
+            return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
         }
         let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")

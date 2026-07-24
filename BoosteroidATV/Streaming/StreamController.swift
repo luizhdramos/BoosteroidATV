@@ -68,6 +68,13 @@ final class StreamController: NSObject {
     private var controlChannelTask: Task<Void, Never>?
     private var watchdogTasks: [Task<Void, Never>] = []
     private var didStartWebRTC = false
+    // CONFIRMED 2026-07-23 from webrtcstreamer.js: local ICE candidates are
+    // BUFFERED ("earlyCandidates") and only POSTed to the server AFTER the
+    // answer is received. The app was sending them immediately (before the
+    // `call`), so the server never registered our address and sent no media
+    // (ICE "connected" via peer-reflexive, but 0 bytes). Buffer + flush.
+    private var iceCanSend = false
+    private var pendingLocalICE: [(sdp: String, sdpMid: String?, sdpMLineIndex: Int)] = []
     private(set) var videoView: VideoSurfaceView?
     private var statsTimer: Timer?
     private var sessionInfo: SessionInfo?
@@ -284,6 +291,8 @@ final class StreamController: NSObject {
             throw StreamControllerError.peerConnectionCreationFailed
         }
         peerConnection = pc
+        iceCanSend = false
+        pendingLocalICE = []
 
         // Create the "ClientDataChannel" BEFORE the offer so it appears as an
         // m=application line — matching Boosteroid's own webrtcstreamer.js
@@ -320,6 +329,15 @@ final class StreamController: NSObject {
                 if let error { cont.resume(throwing: error) } else { cont.resume() }
             }
         }
+
+        // Answer is set — now it's safe to send our ICE candidates (matches the
+        // browser's earlyCandidates flush). Send everything gathered so far,
+        // then let didGenerate send the rest live.
+        iceCanSend = true
+        for c in pendingLocalICE {
+            signaling.sendICECandidate(candidate: c.sdp, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex)
+        }
+        pendingLocalICE = []
     }
 
     // MARK: Private — Stats
@@ -383,8 +401,15 @@ extension StreamController: LKRTCPeerConnectionDelegate {
     }
 
     nonisolated func peerConnection(_ peerConnection: LKRTCPeerConnection, didGenerate candidate: LKRTCIceCandidate) {
+        let c = (sdp: candidate.sdp, sdpMid: candidate.sdpMid, sdpMLineIndex: Int(candidate.sdpMLineIndex))
         Task { @MainActor in
-            self.signaling?.sendICECandidate(candidate: candidate.sdp, sdpMid: candidate.sdpMid, sdpMLineIndex: Int(candidate.sdpMLineIndex))
+            // Buffer until the answer is set (see iceCanSend) — sending before
+            // the server has processed our offer/call loses the candidates.
+            if self.iceCanSend {
+                self.signaling?.sendICECandidate(candidate: c.sdp, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex)
+            } else {
+                self.pendingLocalICE.append(c)
+            }
         }
     }
 
