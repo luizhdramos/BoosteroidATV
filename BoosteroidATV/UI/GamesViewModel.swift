@@ -58,28 +58,30 @@ class GamesViewModel {
             // getActiveSessions reads GET /api/v1/streaming/user/last-session
             // (the single most-recent session for the account, any game).
             let sessions = (try? await client.getActiveSessions(cookies: cookies)) ?? []
-            guard let session = sessions.first else {
-                return LaunchCheck(canPlay: false, message: notRunningMessage(game))
+
+            // ONLY a genuinely live ("LI") session counts. CONFIRMED (see
+            // CLAUDE.md): last-session can sit on a stale/orphaned "EN"
+            // (queued) record indefinitely even when the user started
+            // nothing — so "EN" must NOT be surfaced as "a game is queued"
+            // (that produced a confusing "another game is in the queue"
+            // message when nothing was actually running). Treat anything
+            // that isn't LI as "nothing is running".
+            guard let live = sessions.first(where: { $0.status == "LI" }) else {
+                return LaunchCheck(canPlay: false, message: noRunningSessionMessage(game))
             }
-            if session.gameId == game.id {
-                if session.status == "LI" {
-                    return LaunchCheck(canPlay: true, message: nil)
-                }
-                // "EN" (or anything not-live) for THIS game = queued.
-                return LaunchCheck(canPlay: false, message:
-                    "\(game.title) is still in the queue. Wait for it to start running, then open it here to play.")
+            if live.gameId == game.id {
+                return LaunchCheck(canPlay: true, message: nil)
             }
-            // A session exists, but for a DIFFERENT game.
-            let stateWord = session.status == "LI" ? "running" : "in the queue"
+            // A DIFFERENT game is genuinely running right now.
             return LaunchCheck(canPlay: false, message:
-                "Another game is currently \(stateWord). Finish or wait for it, then start \(game.title) on another device (e.g. your browser) and open it here once it's running.")
+                "A different game is currently running on your account. Close that session first, then start \(game.title) on another device and open it here.")
         } catch {
             return LaunchCheck(canPlay: false, message:
                 "Couldn't check the session status: \(error.localizedDescription)")
         }
     }
 
-    private func notRunningMessage(_ game: GameInfo) -> String {
-        "\(game.title) isn't running yet. Start it on another device (e.g. your browser) first — once it's running, open it here to take over and play."
+    private func noRunningSessionMessage(_ game: GameInfo) -> String {
+        "No game is currently running. Start \(game.title) on another device (e.g. your browser) and wait until it's actually playing — then open it here to take over."
     }
 }
