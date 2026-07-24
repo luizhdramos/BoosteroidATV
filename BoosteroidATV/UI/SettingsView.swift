@@ -4,36 +4,29 @@ struct SettingsView: View {
     @Environment(AuthManager.self) var authManager
     @Environment(GamesViewModel.self) var viewModel
 
+    private let resolutions: [(String, String)] = [
+        ("720p", "1280x720"), ("1080p", "1920x1080"),
+        ("1440p", "2560x1440"), ("4K", "3840x2160"),
+    ]
+    private let fpsOptions: [(String, Int)] = [("30", 30), ("60", 60), ("120", 120)]
+
     var body: some View {
         @Bindable var viewModel = viewModel
         NavigationStack {
             Form {
-                Section {
-                    Picker("Resolution", selection: $viewModel.streamSettings.resolution) {
-                        Text("1280×720").tag("1280x720")
-                        Text("1920×1080").tag("1920x1080")
-                        Text("2560×1440").tag("2560x1440")
-                        Text("3840×2160 (4K)").tag("3840x2160")
-                    }
-                    Picker("FPS", selection: $viewModel.streamSettings.fps) {
-                        Text("30").tag(30)
-                        Text("60").tag(60)
-                        Text("120").tag(120)
-                    }
-                    Picker("Codec", selection: $viewModel.streamSettings.codec) {
-                        ForEach(VideoCodec.allCases, id: \.self) { codec in
-                            Text(codec.rawValue).tag(codec)
-                        }
-                    }
-                } header: {
-                    Text("Stream Quality")
-                } footer: {
+                Section("Stream Quality") {
+                    OptionRow(title: "Resolution", options: resolutions,
+                              selection: $viewModel.streamSettings.resolution)
+                    OptionRow(title: "FPS", options: fpsOptions,
+                              selection: $viewModel.streamSettings.fps)
+                    OptionRow(title: "Codec",
+                              options: VideoCodec.allCases.map { ($0.rawValue, $0) },
+                              selection: $viewModel.streamSettings.codec)
                     Text("Higher resolution/FPS depend on your Boosteroid plan and connection. H.264 is the most compatible codec — switch back to it if a game shows a black screen on H.265 or AV1.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Controller") {
-                    // Note: SwiftUI's Slider (and Stepper) are unavailable on
-                    // tvOS — the platform has no drag/click gesture model for
-                    // them. Use plain focusable buttons instead.
                     HStack {
                         Text("Deadzone: \(Int(viewModel.streamSettings.controllerDeadzone * 100))%")
                         Spacer()
@@ -54,6 +47,27 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+        }
+    }
+}
+
+/// A tvOS-friendly single-choice selector: a label plus one focusable button
+/// per option, the selected one highlighted. Avoids SwiftUI's `Picker`, whose
+/// pushed selection screen renders blank inside a Form/TabView on tvOS.
+private struct OptionRow<Value: Hashable>: View {
+    let title: String
+    let options: [(String, Value)]
+    @Binding var selection: Value
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text(title)
+            Spacer()
+            ForEach(options, id: \.1) { label, value in
+                Button(label) { selection = value }
+                    .buttonStyle(.bordered)
+                    .tint(selection == value ? .orange : .gray)
+            }
         }
     }
 }
