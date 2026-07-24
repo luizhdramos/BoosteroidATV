@@ -72,7 +72,7 @@ struct StreamView: View {
                     }
                 }
             case .streaming:
-                VideoSurfaceViewRepresentable(streamController: controller, showOverlay: showOverlay)
+                VideoSurfaceViewRepresentable(streamController: controller, showOverlay: showOverlay, onMenu: { showOverlay.toggle() })
                     .ignoresSafeArea()
                 // Always-on diagnostic HUD: if the screen is black, this says
                 // whether ICE connected, a video track arrived, and frames are
@@ -107,23 +107,31 @@ struct StreamView: View {
     }
 
     private var overlay: some View {
-        VStack {
-            Spacer()
-            HStack(spacing: 24) {
-                Text(String(format: "%.0f fps", controller.stats.fps))
-                Text("\(controller.stats.bitrateKbps) kbps")
-                Text(String(format: "%.0f ms", controller.stats.rttMs))
-                Button("Exit Session") {
-                    controller.disconnect()
-                    onDismiss()
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            VStack(spacing: 28) {
+                Text(game.title)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text("\(Int(controller.stats.fps)) fps · \(controller.stats.bitrateKbps) kbps · \(controller.stats.resolutionWidth)x\(controller.stats.resolutionHeight)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 24) {
+                    Button("Resume") { showOverlay = false }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                    Button("Leave Game") {
+                        controller.disconnect()
+                        onDismiss()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
                 }
-                .buttonStyle(.bordered)
-                .tint(.red)
             }
-            .padding()
-            .background(.black.opacity(0.7))
-            .foregroundStyle(.white)
+            .padding(48)
         }
+        // Menu/back on the remote closes the menu (Resume) instead of exiting.
+        .onExitCommand { showOverlay = false }
     }
 
     private func statusView(title: String, message: String) -> some View {

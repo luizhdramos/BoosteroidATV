@@ -82,10 +82,10 @@ final class VideoSurfaceView: UIView {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
-            if press.type == .menu {
-                if overlayVisible { menuPressHandler?() }
-                handled = true
-            } else if press.type == .playPause && !gamepadModeActive {
+            if press.type == .menu || press.type == .playPause {
+                // Both open the in-stream menu (the only way back Home, since
+                // the game surface otherwise captures every press). The overlay
+                // itself handles closing (Resume / exit-command).
                 menuPressHandler?()
                 handled = true
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
@@ -319,9 +319,13 @@ import SwiftUI
 struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
     let streamController: StreamController
     var showOverlay: Bool = false
+    /// Called when the user presses Menu or Play/Pause on the remote — used to
+    /// open the in-stream pause menu (the way back Home).
+    var onMenu: () -> Void = {}
 
     func makeUIViewController(context: Context) -> StreamingViewController {
         let vc = StreamingViewController()
+        vc.videoSurface.menuPressHandler = onMenu
         Task { @MainActor in
             streamController.bindVideoView(vc.videoSurface)
         }
@@ -330,6 +334,7 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
 
     func updateUIViewController(_ vc: StreamingViewController, context: Context) {
         vc.videoSurface.videoTrack = streamController.videoTrack
+        vc.videoSurface.menuPressHandler = onMenu
         vc.controllerUserInteractionEnabled = showOverlay
         vc.videoSurface.overlayVisible = showOverlay
     }

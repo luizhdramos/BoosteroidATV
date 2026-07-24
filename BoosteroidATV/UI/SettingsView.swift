@@ -19,10 +19,13 @@ struct SettingsView: View {
                               selection: $viewModel.streamSettings.resolution)
                     OptionRow(title: "FPS", options: fpsOptions,
                               selection: $viewModel.streamSettings.fps)
-                    OptionRow(title: "Codec",
-                              options: VideoCodec.allCases.map { ($0.rawValue, $0) },
-                              selection: $viewModel.streamSettings.codec)
-                    Text("Higher resolution/FPS depend on your Boosteroid plan and connection. H.264 is the most compatible codec — switch back to it if a game shows a black screen on H.265 or AV1.")
+                    HStack {
+                        Text("Codec")
+                        Spacer()
+                        Text("H.264")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Higher resolution/FPS depend on your Boosteroid plan and connection. Codec is fixed to H.264: Boosteroid only streams H.264 or AV1, and Apple TV can't decode AV1 (and Boosteroid doesn't offer H.265/HEVC).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

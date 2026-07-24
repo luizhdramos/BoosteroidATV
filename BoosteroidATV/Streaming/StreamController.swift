@@ -329,7 +329,11 @@ final class StreamController: NSObject {
         // Restricting to one codec removes the ambiguity and lines the PTs up
         // like the browser's negotiation. preferCodec falls back to H.264 if the
         // chosen codec isn't offered, so H.264 stays the safe path.
-        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: settings.codec)
+        // Hardcoded H.264: it's the only codec that works on Apple TV +
+        // Boosteroid (Boosteroid streams only H.264/AV1; Apple TV can't decode
+        // AV1 and Boosteroid doesn't offer H.265). Also guards against a stale
+        // saved codec from an older build.
+        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: .h264)
         let finalOffer = LKRTCSessionDescription(type: .offer, sdp: mungedSdp)
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
