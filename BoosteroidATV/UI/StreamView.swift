@@ -96,7 +96,7 @@ struct StreamView: View {
     /// (Apple TV only ever gets H.264).
     private var statsOverlay: some View {
         let mbps = Double(controller.stats.bitrateKbps) / 1000
-        let line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps  |  Stream FPS: \(controller.streamFps)  |  Latency: \(controller.rttMs)ms"
+        let line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps | Stream FPS: \(controller.streamFps) | Latency: \(controller.rttMs)ms"
         return VStack {
             HStack {
                 Text(line)
