@@ -32,21 +32,23 @@ struct SettingsView: View {
                 Section("Bitrate") {
                     Toggle("Automatic bitrate", isOn: $viewModel.streamSettings.automaticBitrate)
                     if !viewModel.streamSettings.automaticBitrate {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Max bitrate")
-                                Spacer()
-                                Text("\(viewModel.streamSettings.manualBitrateMbps) Mbps")
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
+                        HStack {
+                            Text("Max bitrate")
+                            Spacer()
+                            Button {
+                                viewModel.streamSettings.manualBitrateMbps -= 5
+                            } label: {
+                                Image(systemName: "minus.circle")
                             }
-                            Slider(
-                                value: Binding(
-                                    get: { Double(viewModel.streamSettings.manualBitrateMbps) },
-                                    set: { viewModel.streamSettings.manualBitrateMbps = Int($0.rounded()) }
-                                ),
-                                in: 3...80, step: 1
-                            )
+                            Text("\(viewModel.streamSettings.manualBitrateMbps) Mbps")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .frame(minWidth: 120)
+                            Button {
+                                viewModel.streamSettings.manualBitrateMbps += 5
+                            } label: {
+                                Image(systemName: "plus.circle")
+                            }
                         }
                     }
                     Text(viewModel.streamSettings.automaticBitrate
