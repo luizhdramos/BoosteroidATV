@@ -282,30 +282,28 @@ final class InputSender: InputEventHandler {
         }
         lastAxisState[key] = axisState
 
-        // D-pad -> hat. TODO(protocol): only single-direction values are
-        // reasonably inferable from the source; diagonals are approximated
-        // with a standard 8-direction POV-hat numbering, not confirmed.
+        // D-pad -> hat. CONFIRMED 2026-07-24 against Boosteroid's live
+        // catch-events.js: the `hat` is a DIRECTION BITMASK, not a POV-hat
+        // rotation number — up=1, right=2, down=4, left=8, OR'd together for
+        // diagonals (up+left=9, up+right=3, down+left=12, down+right=6). And
+        // crucially the client sends hat=0 on release; without that the server
+        // treats the last direction as still held (this was the "d-pad press
+        // repeats / sticks" bug). An earlier pass used a 0–7 POV numbering
+        // where our "up" was 0 — which the server reads as neutral, so up
+        // silently did nothing.
         let dpad = pad.dpad
-        let hat: Int
-        switch (dpad.up.isPressed, dpad.right.isPressed, dpad.down.isPressed, dpad.left.isPressed) {
-        case (true, false, false, false): hat = 0   // up
-        case (true, true, false, false):  hat = 1   // up-right
-        case (false, true, false, false): hat = 2   // right
-        case (false, true, true, false):  hat = 3   // down-right
-        case (false, false, true, false): hat = 4   // down
-        case (false, false, true, true):  hat = 5   // down-left
-        case (false, false, false, true): hat = 6   // left
-        case (true, false, false, true):  hat = 7   // up-left
-        default: hat = -1 // neutral — not sent, matches "no dpad event" idle state
-        }
+        var hat = 0
+        if dpad.up.isPressed    { hat |= 1 }
+        if dpad.right.isPressed { hat |= 2 }
+        if dpad.down.isPressed  { hat |= 4 }
+        if dpad.left.isPressed  { hat |= 8 }
         if lastHat[key] != hat {
             lastHat[key] = hat
-            if hat >= 0 {
-                controllerEventsSent += 1
-                Task { [controlChannel] in await controlChannel.send(type: "controller", action: "pad", fields: [
-                    "id": id, "hat": hat,
-                ]) }
-            }
+            controllerEventsSent += 1
+            // Sent on every change INCLUDING back to 0, so releases register.
+            Task { [controlChannel] in await controlChannel.send(type: "controller", action: "pad", fields: [
+                "id": id, "hat": hat,
+            ]) }
         }
     }
 

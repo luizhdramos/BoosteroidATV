@@ -98,12 +98,11 @@ import Foundation
 //     round(x * 32767 * 2) - 32767, i.e. an unpressed trigger reports
 //     -32767, not 0.
 //   controller pad (D-pad, sent as a hat rather than 4 buttons):
-//     {type:"controller", action:"pad", id, hat} — TODO(protocol): only a
-//     couple of hat values were confirmed from the source (e.g. up+left
-//     produced 9); this client implements single-direction hats using a
-//     standard 8-direction POV-hat numbering and leaves the exact
-//     diagonal-combo encoding unconfirmed/approximate — a precision gap,
-//     not a correctness one (basic D-pad presses should still register).
+//     {type:"controller", action:"pad", id, hat} — CONFIRMED 2026-07-24 from
+//     catch-events.js: `hat` is a DIRECTION BITMASK (up=1, right=2, down=4,
+//     left=8) OR'd for diagonals (up+left=9, up+right=3, down+left=12,
+//     down+right=6), and hat=0 is sent on release. NOT a POV-hat rotation
+//     number. `id` is a NUMBER on the wire (not a string).
 //   controller rumble (SERVER -> client): {type:"controller",
 //     action:"rumble", id, left, right} — documented for completeness;
 //     not wired to any vibration API on this client yet.
