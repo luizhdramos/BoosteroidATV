@@ -9,9 +9,6 @@ struct SettingsView: View {
         ("1440p", "2560x1440"), ("4K", "3840x2160"),
     ]
     private let fpsOptions: [(String, Int)] = [("30", 30), ("60", 60), ("120", 120)]
-    // AV1 is intentionally omitted: no Apple TV can decode it. H.265 is
-    // experimental — see the footer note in the Codec row.
-    private let codecOptions: [(String, VideoCodec)] = [("H.264", .h264), ("H.265", .h265)]
 
     var body: some View {
         @Bindable var viewModel = viewModel
@@ -22,9 +19,13 @@ struct SettingsView: View {
                               selection: $viewModel.streamSettings.resolution)
                     OptionRow(title: "FPS", options: fpsOptions,
                               selection: $viewModel.streamSettings.fps)
-                    OptionRow(title: "Codec", options: codecOptions,
-                              selection: $viewModel.streamSettings.codec)
-                    Text("Higher resolution/FPS depend on your Boosteroid plan and connection. H.264 is the reliable default. H.265/HEVC is experimental: Apple TV can decode it, but Boosteroid only sends HEVC over its native app's UDP transport — its WebRTC path may not offer it, in which case this safely falls back to H.264. (AV1 is unavailable: no Apple TV can decode it.)")
+                    HStack {
+                        Text("Codec")
+                        Spacer()
+                        Text("H.264")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Higher resolution/FPS depend on your Boosteroid plan and connection. Codec is fixed to H.264 — it's the only format Boosteroid delivers over its WebRTC path (H.265 and AV1 only ship over its native app's UDP transport).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

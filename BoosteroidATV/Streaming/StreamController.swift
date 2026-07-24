@@ -329,15 +329,11 @@ final class StreamController: NSObject {
         // Restricting to one codec removes the ambiguity and lines the PTs up
         // like the browser's negotiation.
         //
-        // Codec choice: the user's setting, but AV1 is force-mapped to H.264
-        // (no Apple TV can decode AV1). H.265/HEVC is EXPERIMENTAL: Apple TV
-        // decodes HEVC in hardware and our libwebrtc offer can advertise it,
-        // but Boosteroid only encodes HEVC over its native UDP transport — its
-        // WebRTC path historically offered only H.264/AV1. preferCodec falls
-        // back to H.264 automatically if HEVC isn't actually in the offer, so
-        // selecting it is safe: worst case you simply get H.264.
-        let requestedCodec: VideoCodec = (self.settings.codec == .av1) ? .h264 : self.settings.codec
-        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: requestedCodec)
+        // Hardcoded H.264: confirmed the only codec Boosteroid delivers over
+        // its WebRTC path. H.265/HEVC and AV1 only ship over its native app's
+        // UDP transport (tested 2026-07 — HEVC over WebRTC silently fell back
+        // to H.264, never negotiated). Also guards against a stale saved codec.
+        let mungedSdp = SDPMunger.preferCodec(offer.sdp, codec: .h264)
         let finalOffer = LKRTCSessionDescription(type: .offer, sdp: mungedSdp)
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
