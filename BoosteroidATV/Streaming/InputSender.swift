@@ -37,6 +37,16 @@ final class InputSender: InputEventHandler {
     /// Radial deadzone applied to analog stick axes (0.0–1.0).
     var deadzone: Float = 0.15
 
+    // MARK: - Diagnostics (read by StreamController for the on-screen HUD)
+    /// Number of extended gamepads currently seen by GameController.
+    private(set) var connectedControllerCount = 0
+    /// Total controller button/axes/pad frames sent since start().
+    private(set) var controllerEventsSent = 0
+    /// The most recent server-assigned controller id, if the ack arrived.
+    /// nil means we're running on the provisional (index) id — input still
+    /// flows, this just tells us whether the server handshake completed.
+    private(set) var lastServerAckId: String?
+
     // Per-controller server-assigned ids (CONFIRMED required before the
     // server accepts button/axes/pad events for that controller — see
     // BoosteroidControlChannel's header comment) and the "name" token we
@@ -103,7 +113,9 @@ final class InputSender: InputEventHandler {
     func handleIncoming(_ event: BoosteroidControlChannel.IncomingEvent) {
         switch event {
         case .controllerAck(let name, let id):
+            lastServerAckId = id
             if let key = pendingControllerNames.first(where: { $0.value == name })?.key {
+                // Upgrade from the provisional (index) id to the server's id.
                 controllerIds[key] = id
                 pendingControllerNames.removeValue(forKey: key)
             }
@@ -158,6 +170,17 @@ final class InputSender: InputEventHandler {
         // same way here since we only need it to match our own ack.
         let name = "\(controller.vendorName ?? "Boosteroid tvOS Controller")#\(index)"
         pendingControllerNames[key] = name
+
+        // Provisional id so polling can send input IMMEDIATELY, without
+        // deadlocking on a server ack that (per real-hardware testing) may
+        // never arrive or arrive in an unparsed shape. We use the controller
+        // index — the browser's Gamepad API keys events by gamepad.index, so
+        // this is the most likely value the server assigns anyway. If a real
+        // controller/connected ack does come back, handleIncoming upgrades
+        // controllerIds[key] to the server's id (see there).
+        controllerIds[key] = String(index)
+        connectedControllerCount = GCController.controllers().count
+
         Task { [controlChannel] in await controlChannel.send(type: "controller", action: "connected", fields: ["name": name]) }
     }
 
@@ -171,6 +194,7 @@ final class InputSender: InputEventHandler {
         lastButtonState.removeValue(forKey: key)
         lastAxisState.removeValue(forKey: key)
         lastHat.removeValue(forKey: key)
+        connectedControllerCount = GCController.controllers().count
     }
 
     // MARK: - Controller Polling
@@ -208,6 +232,7 @@ final class InputSender: InputEventHandler {
         for (index, isPressed) in buttons {
             if buttonState[index] != isPressed {
                 buttonState[index] = isPressed
+                controllerEventsSent += 1
                 Task { [controlChannel] in await controlChannel.send(type: "controller", action: "button", fields: [
                     "id": id, "button": index, "value": isPressed ? 1 : 0,
                 ]) }
@@ -240,6 +265,7 @@ final class InputSender: InputEventHandler {
             let old = axisState[index] ?? (index == 2 || index == 5 ? -Int(Self.maxAxis) : 0)
             if abs(scaled - old) > Self.axisChangeThreshold {
                 axisState[index] = scaled
+                controllerEventsSent += 1
                 Task { [controlChannel] in await controlChannel.send(type: "controller", action: "axes", fields: [
                     "id": id, "axes": index, "value": scaled,
                 ]) }
@@ -266,6 +292,7 @@ final class InputSender: InputEventHandler {
         if lastHat[key] != hat {
             lastHat[key] = hat
             if hat >= 0 {
+                controllerEventsSent += 1
                 Task { [controlChannel] in await controlChannel.send(type: "controller", action: "pad", fields: [
                     "id": id, "hat": hat,
                 ]) }

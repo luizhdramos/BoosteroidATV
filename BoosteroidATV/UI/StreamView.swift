@@ -83,6 +83,7 @@ struct StreamView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("ICE \(controller.iceState) · conn \(controller.peerConnState) · dc \(controller.dataChannelState) · track \(controller.gotVideoTrack ? "yes" : "no") · \(controller.stats.resolutionWidth)x\(controller.stats.resolutionHeight) · \(Int(controller.stats.fps))fps · \(controller.stats.bitrateKbps)kbps")
                             Text("codec \(controller.codecName) · pkts \(controller.packetsReceived) · framesRx \(controller.framesReceived) · keyFrames \(controller.keyFramesDecoded) · framesDec \(controller.framesDecoded)")
+                            Text("pad \(controller.controllerCount) · sent \(controller.controllerEventsSent) · ack \(controller.controllerAckId)")
                         }
                         .font(.caption.monospaced())
                         .padding(8)

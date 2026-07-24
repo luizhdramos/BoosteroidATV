@@ -65,6 +65,12 @@ final class StreamController: NSObject {
     private(set) var packetsReceived = 0
     private(set) var codecName = "?"
     private var lastBytesReceived = 0
+    // Controller input diagnostics (mirrored from InputSender each stats tick)
+    // so the HUD can show whether a pad is seen, whether frames are being
+    // sent, and whether the server acked the controller handshake.
+    private(set) var controllerCount = 0
+    private(set) var controllerEventsSent = 0
+    private(set) var controllerAckId: String = "-"
 
     private var peerConnection: LKRTCPeerConnection?
     /// CONFIRMED 2026-07-23: Boosteroid's webrtcstreamer.js always creates a
@@ -409,6 +415,12 @@ final class StreamController: NSObject {
                 self.keyFramesDecoded = keyFrames
                 self.packetsReceived = packets
                 self.codecName = codecs[codecId] ?? (codecId.isEmpty ? "?" : codecId)
+
+                if let sender = self.inputSender {
+                    self.controllerCount = sender.connectedControllerCount
+                    self.controllerEventsSent = sender.controllerEventsSent
+                    self.controllerAckId = sender.lastServerAckId ?? "none(provisional)"
+                }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
