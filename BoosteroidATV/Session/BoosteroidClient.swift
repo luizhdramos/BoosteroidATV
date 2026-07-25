@@ -293,16 +293,10 @@ actor BoosteroidClient {
             // this reuses it rather than inventing a synthetic marker.
             // queryString is now actually used — see SessionInfo's doc
             // comment and BoosteroidControlChannel.
-            // `gw` is optional now (see the DTO): when it's missing the host
-            // comes from the gateway list instead — same fallback as
-            // detailsIfReady.
-            let gateway: String?
-            if let gw = dto.data.gw, !gw.isEmpty {
-                gateway = gw
-            } else {
-                gateway = await preferredGateway(cookies: cookies)
-            }
-            return SessionInfo(sessionId: sessionId, nodeBaseUrl: gateway, status: "LI", queryString: dto.data.queryString)
+            // `gw` is optional now (see the DTO). Left nil when absent rather
+            // than guessed from the gateway list — see detailsIfReady for why
+            // guessing was actively harmful.
+            return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI", queryString: dto.data.queryString)
         }
         throw BoosteroidClientError.requestFailed("session/details", "Got \(retriesOnEmptyBody + 1) consecutive empty responses (HTTP \(lastEmptyStatus)) — the session may have just been claimed by another device and hasn't settled yet. Try again in a moment.")
     }
@@ -432,20 +426,26 @@ actor BoosteroidClient {
         if let gw = dto.data.gw, !gw.isEmpty {
             return SessionInfo(sessionId: sessionId, nodeBaseUrl: gw, status: "LI", queryString: dto.data.queryString)
         }
-        // CONFIRMED 2026-07-24: after claiming a machine, details can return
-        // 200 with ONLY `queryString`. The web client handles exactly this by
-        // fetching the gateway list separately and combining it with the claim
-        // result, so do the same rather than treating it as "not ready".
-        guard let queryString = dto.data.queryString, !queryString.isEmpty,
-              let gateway = await preferredGateway(cookies: cookies) else { return nil }
-        return SessionInfo(sessionId: sessionId, nodeBaseUrl: gateway, status: "LI", queryString: queryString)
+        // No `gw` yet → NOT ready. Keep waiting.
+        //
+        // An earlier pass filled the gap with the first `priority` entry from
+        // /v1/streaming/gateways. That was a guess, and a bad one: the account
+        // has 16 priority gateways (so0-so7, sp0-sp7), so it picked the right
+        // machine about one time in sixteen and otherwise produced "control
+        // channel failed … socket is not connected". A wrong host is worse than
+        // waiting, so never guess — the host must come from `gw` here or from
+        // the claim response (see StreamView.gatewayFromClaim).
+        return nil
     }
 
-    /// The account's own gateway host, from `GET /v1/streaming/gateways`
+    /// The account's gateway hosts, from `GET /v1/streaming/gateways`
     /// (CONFIRMED 2026-07-24). Entries flagged `priority` are the ones for the
-    /// account's region — prefer those, else fall back to the first listed.
-    /// Parsed leniently (the payload has been seen both bare and wrapped in
-    /// `data`).
+    /// account's region. Parsed leniently (the payload has been seen both bare
+    /// and wrapped in `data`).
+    ///
+    /// NOT used to pick a streaming host: the account has 16 priority gateways,
+    /// so choosing one here is a 1-in-16 guess that breaks the control socket.
+    /// Kept for region/zone display and as documentation of the endpoint.
     func preferredGateway(cookies: [String: String]) async -> String? {
         let url = URL(string: "\(apiBase)/v1/streaming/gateways")!
         let req = authenticatedRequest(url, cookies: cookies, method: "GET")
