@@ -320,7 +320,12 @@ actor BoosteroidClient {
         // client does not poll like this: queue progress arrives over the
         // realtime socket (`queues/state`) and the "machine ready" moment over
         // `queues/start`. So REST polling here is only a slow safety net.
-        queuedPollIntervalNanoseconds: UInt64 = 15_000_000_000,
+        // Escalating 429s (8min, then 15min, then 32min lockouts) traced back to
+        // this loop's volume: at 15s it issued ~8 requests/min, so a 25-minute
+        // queue alone was ~200 calls. While queued we now poll only as a slow
+        // safety net — the realtime socket is the real signal — and only go
+        // quick once a machine is actually being assigned.
+        queuedPollIntervalNanoseconds: UInt64 = 60_000_000_000,
         setupPollIntervalNanoseconds: UInt64 = 3_000_000_000,
         setupTimeoutSeconds: TimeInterval = 180,
         onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil
@@ -371,13 +376,15 @@ actor BoosteroidClient {
                 current = SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
                 await onPoll?(current, attempt)
 
-                // Ask details every cycle. It's the ONLY source of the gateway
-                // (CONFIRMED: a healthy session returns {queryString, gw} with
-                // gw a plain string), and skipping it while status is "EN" risks
-                // missing the transition — a session with no queue goes ready
-                // almost immediately. At the slow queued cadence this is only a
-                // few requests a minute, well clear of the rate limiter.
-                if let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
+                // details is the ONLY source of the gateway (CONFIRMED: a ready
+                // session returns {queryString, gw}, gw a plain string). While
+                // still queued it can only answer 406, so asking then is pure
+                // waste — and waste is what triggered the rate-limit lockouts.
+                // The no-queue case is already covered by the immediate check
+                // before this loop, and the queued case by the status leaving
+                // "EN" after the confirmation.
+                if dto.data.status != "EN",
+                   let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
                     return ready
                 }
 
