@@ -147,67 +147,64 @@ final class BoosteroidSignalingClient {
     /// a hard failure, and the final error carries the actual body so the shape
     /// is never a guess again.
     func fetchIceServers() async throws -> [IceServer] {
-        var lastBody = ""
-        for attempt in 0...iceRetryCount {
-            let data = try await getWithRetryOnEmptyBody(path: "getIceServers")
-            if let decoded = try? JSONDecoder().decode(IceServersResponse.self, from: data),
-               !decoded.iceServers.isEmpty {
-                return decoded.iceServers
-            }
-            lastBody = String(data: data.prefix(200), encoding: .utf8) ?? "<non-utf8>"
-            if attempt < iceRetryCount {
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-            }
+        let data = try await getUntilReady(path: "getIceServers")
+        guard let decoded = try? JSONDecoder().decode(IceServersResponse.self, from: data),
+              !decoded.iceServers.isEmpty else {
+            throw SignalingError.callFailed(
+                "getIceServers returned no ICE servers (body: \(Self.preview(data)))."
+            )
+        }
+        return decoded.iceServers
+    }
+
+    func fetchParams() async throws -> StreamParams {
+        let data = try await getUntilReady(path: "getParams")
+        guard let decoded = try? JSONDecoder().decode(StreamParams.self, from: data) else {
+            throw SignalingError.callFailed(
+                "getParams returned unusable params (body: \(Self.preview(data)))."
+            )
+        }
+        return decoded
+    }
+
+    /// GETs a signaling endpoint, waiting out the window where the assigned
+    /// machine exists but its streaming service isn't up yet.
+    ///
+    /// CONFIRMED 2026-07-24 from a real failure body: the node answers
+    /// `502 {"error":"Bad Gateway","message":"Target service unavailable"}`
+    /// while the VM behind the gateway is still booting. `session/details`
+    /// hands out the gateway as soon as the session goes "LI", which is EARLIER
+    /// than the VM being able to negotiate — so this is expected, not an error,
+    /// and the only correct response is to keep asking.
+    ///
+    /// Retries on: a 5xx / "service unavailable" body, an empty body, and a
+    /// body that simply doesn't parse yet. Gives up after `readyTimeout` with
+    /// the real body attached.
+    private func getUntilReady(path: String, readyTimeout: TimeInterval = 90) async throws -> Data {
+        let deadline = Date().addingTimeInterval(readyTimeout)
+        var lastStatus = 0
+        var lastData = Data()
+        while Date() < deadline {
+            let (data, response) = try await session.data(for: authenticatedRequest(url(path)))
+            lastStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+            lastData = data
+            let bootingUp = lastStatus >= 500
+                || data.isEmpty
+                || Self.preview(data).localizedCaseInsensitiveContains("unavailable")
+            if !bootingUp { return data }
+            try await Task.sleep(nanoseconds: 2_000_000_000)
         }
         throw SignalingError.callFailed(
-            "getIceServers never returned any ICE servers (last body: \(lastBody)). "
-            + "The node answers before it's ready to negotiate; if this persists the session "
-            + "may not actually be assigned to this host."
+            "\(path) never became available within \(Int(readyTimeout))s "
+            + "(last HTTP \(lastStatus), body: \(Self.preview(lastData))). "
+            + "The assigned machine's streaming service never came up."
         )
     }
 
-    /// Retries on the same "valid JSON but not the expected shape yet" basis as
-    /// fetchIceServers, and surfaces the real body on failure.
-    func fetchParams() async throws -> StreamParams {
-        var lastBody = ""
-        for attempt in 0...iceRetryCount {
-            let data = try await getWithRetryOnEmptyBody(path: "getParams")
-            if let decoded = try? JSONDecoder().decode(StreamParams.self, from: data) {
-                return decoded
-            }
-            lastBody = String(data: data.prefix(200), encoding: .utf8) ?? "<non-utf8>"
-            if attempt < iceRetryCount {
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-            }
-        }
-        throw SignalingError.callFailed("getParams never returned usable params (last body: \(lastBody)).")
+    private static func preview(_ data: Data) -> String {
+        String(data: data.prefix(200), encoding: .utf8) ?? "<non-utf8>"
     }
 
-    /// ~12s of patience total, matching how long a freshly-claimed session can
-    /// take to become negotiable.
-    private var iceRetryCount: Int { 7 }
-
-    /// CONFIRMED 2026-07-22 (real device report): `session/details` on the
-    /// main API can return HTTP 200 with an EMPTY body right after a
-    /// different client just claimed the session, and a manual retry a few
-    /// seconds later succeeds — see BoosteroidClient.fetchSessionDetails'
-    /// doc comment for the full story. `getIceServers`/`getParams` here hit
-    /// the SAME just-claimed session moments later in the connect flow, so
-    /// they get the same transient-empty-body retry treatment rather than
-    /// failing immediately with Foundation's generic "the data couldn't be
-    /// read because it is missing" decode error.
-    private func getWithRetryOnEmptyBody(path: String, retries: Int = 2) async throws -> Data {
-        var lastStatus = 0
-        for attempt in 0...retries {
-            let (data, response) = try await session.data(for: authenticatedRequest(url(path)))
-            if !data.isEmpty { return data }
-            lastStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if attempt < retries {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-        }
-        throw SignalingError.callFailed("\(path) returned an empty body \(retries + 1) times in a row (HTTP \(lastStatus)) — possibly still settling after another device claimed this session, or an auth/session problem talking to the streaming node.")
-    }
 
     // MARK: Send Offer / Receive Answer
     //
