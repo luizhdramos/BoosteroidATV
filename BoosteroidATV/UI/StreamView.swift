@@ -20,6 +20,11 @@ struct StreamView: View {
     @State private var queueStartedAt = Date()
     @State private var queuePosition: Int?
     @State private var queueEta: Int?
+    /// Diagnostics for "some games never show a queue position" — see
+    /// watchQueuePosition().
+    @State private var queueDebug = ""
+    @State private var queueUpdatesSeen = 0
+    @State private var seenAppIds: [Int] = []
     @State private var realtimeClient = BoosteroidRealtimeClient()
 
     var body: some View {
@@ -63,6 +68,11 @@ struct StreamView: View {
                                 Text("Status: \(queueStatus.isEmpty ? "waiting" : queueStatus) — waited \(Int(Date().timeIntervalSince(queueStartedAt)))s")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if !queueDebug.isEmpty {
+                                    Text(queueDebug)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                         Button("Cancel") { onDismiss() }
@@ -196,11 +206,22 @@ struct StreamView: View {
     /// actually decides when to proceed.
     private func watchQueuePosition() async {
         guard let (userId, token) = try? await authManager.resolveRealtimeCredentials() else { return }
-        guard let targetAppId = Int(game.id) else { return }
+        guard let targetAppId = Int(game.id) else {
+            queueDebug = "game id '\(game.id)' isn't numeric — can't match queue pushes"
+            return
+        }
         for await event in await realtimeClient.connect(userId: userId, token: token) {
             if Task.isCancelled { break }
             switch event {
             case .queueUpdate(let appId, let position, let eta):
+                // Diagnostic: record every queue push we see, matching or not.
+                // If a game never shows a position, this distinguishes "the
+                // server pushes nothing for this session" (likely a stale/
+                // orphaned EN session we attached to) from "it pushes under a
+                // different appId" (a filter mismatch here).
+                queueUpdatesSeen += 1
+                if !seenAppIds.contains(appId) { seenAppIds.append(appId) }
+                queueDebug = "pushes: \(queueUpdatesSeen) · appIds seen: \(seenAppIds.map(String.init).joined(separator: ",")) · want: \(targetAppId)"
                 guard appId == targetAppId else { continue }
                 queuePosition = position
                 queueEta = eta
