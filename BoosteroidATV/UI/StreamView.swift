@@ -303,24 +303,36 @@ struct StreamView: View {
                 // earned a 429), so exactly one call, mirroring the browser's
                 // "INICIAR" button. `appId` may be absent in the push, in which
                 // case it's for the game we're waiting on.
-                // Do NOT call session/start here.
+                // CONFIRMED 2026-07-24, both paths observed live:
                 //
-                // CONFIRMED 2026-07-24 by driving a healthy session in the
-                // browser and watching every request: the web client calls ONLY
-                // enqueue, then goes straight to streaming — session/start is
-                // never sent, the session reaches status "LI", and
-                // session/details returns {queryString, gw} with gw a plain
-                // STRING ("https://sp5.cloud.boosteroid.com:443").
+                // * NO QUEUE: enqueue alone is enough — the session goes to "LI"
+                //   and details returns gw. session/start is never sent.
+                // * AFTER A QUEUE (this branch): the machine is only RESERVED.
+                //   The web client shows "machine found / INICIAR" and that
+                //   button POSTs session/start. Watched in the browser: right
+                //   after it, status is "UN" with no gw for a few seconds, then
+                //   flips to "LI" with gw (e.g. sp6). Without that call the
+                //   reservation just sits there — which is this app's
+                //   "Machine ready — waiting for host…" hang.
                 //
-                // Our calling session/start is what produced the broken state:
-                // the session went to "UN" and details then returned only
-                // queryString, with no gw ever — i.e. no machine assigned. So
-                // the ready signal is informational only; the host comes from
-                // polling details for gw.
-                _ = (sessionToken, valueKeys)
+                // So the claim IS required here. An earlier pass removed it
+                // after seeing only the no-queue path; that was wrong.
                 guard !didClaimMachine, appId == nil || appId == targetAppId else { continue }
                 didClaimMachine = true
-                claimResult = "Machine ready — waiting for host…"
+                claimResult = "Machine ready — confirming…"
+                guard let cookies = try? await authManager.resolveCookies() else { continue }
+                let result = await BoosteroidClient().startStreamingSession(
+                    appId: targetAppId, sessionToken: sessionToken, cookies: cookies
+                )
+                // Report the token/fields either way: the exact spelling of the
+                // token field in this push still hasn't been captured, and a
+                // claim can return 2xx while the machine never gets assigned.
+                let tokenNote = sessionToken == nil
+                    ? "no token (fields: [\(valueKeys.joined(separator: ","))])"
+                    : "token ok"
+                claimResult = (200...299).contains(result.status)
+                    ? "Confirmed (\(result.status), \(tokenNote)) — waiting for host…"
+                    : "Confirm failed (\(result.status), \(tokenNote)): \(result.body.prefix(70))"
             case .raw, .closed, .failed:
                 continue
             }
