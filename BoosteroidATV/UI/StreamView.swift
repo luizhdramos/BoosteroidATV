@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Drives StreamController against BoosteroidClient's CONFIRMED,
 /// end-to-end-verified session lifecycle (enqueue -> poll last-session ->
@@ -123,7 +124,16 @@ struct StreamView: View {
             }
         }
         .task { await start() }
-        .onDisappear { controller.disconnect() }
+        // Keep the Apple TV awake for the WHOLE session, queue included.
+        // Otherwise the screen saver kicks in while waiting and the device can
+        // sleep, suspending the app — which drops the control/realtime sockets
+        // and loses the machine-ready window (tvOS gives no background
+        // execution, so a suspended app cannot hold a queue).
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            controller.disconnect()
+        }
     }
 
     /// Discreet single-line performance overlay pinned to the top-left edge:
