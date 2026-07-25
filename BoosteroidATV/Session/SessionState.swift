@@ -131,16 +131,35 @@ nonisolated struct BoosteroidLastSessionDTO: Codable {
 
 /// CONFIRMED shape of `POST /api/v1/streaming/session/details`'s SUCCESS
 /// body (HTTP 200) — see SessionInfo doc comment above.
-nonisolated struct BoosteroidSessionDetailsSuccessDTO: Codable {
-    struct Payload: Codable {
-        /// OPTIONAL as of 2026-07-24: a claimed session's details can come back
-        /// with ONLY `queryString` and no `gw` at all. This was `String` (non
-        /// optional), so decoding failed outright and the caller treated a
-        /// perfectly good response as "not ready" — the app then waited forever
-        /// on a session that was already claimed. When it's absent, resolve the
-        /// host from `/v1/streaming/gateways` instead.
-        let gw: String?
+nonisolated struct BoosteroidSessionDetailsSuccessDTO: Decodable {
+    struct Payload: Decodable {
+        /// The assigned machine's base URL, e.g. "https://so2.cloud.boosteroid.com:443".
+        ///
+        /// CONFIRMED 2026-07-24 from streaming.js, which builds its control
+        /// socket as `wss://${gw.address.split(...)}`: `gw` is an OBJECT with an
+        /// `address` field — the same shape as a `/v1/streaming/gateways` entry
+        /// — NOT a bare string. Declaring it `String` made the whole DTO fail to
+        /// decode, so a perfectly good response was read as "not ready" and the
+        /// app waited forever. Decoded here from either shape, and optional
+        /// because a session that hasn't been assigned a machine yet omits it.
+        let gwAddress: String?
         let queryString: String?
+
+        private enum CodingKeys: String, CodingKey { case gw, queryString }
+
+        private struct Gateway: Decodable { let address: String }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            queryString = try? c.decode(String.self, forKey: .queryString)
+            if let asString = try? c.decode(String.self, forKey: .gw) {
+                gwAddress = asString
+            } else if let asObject = try? c.decode(Gateway.self, forKey: .gw) {
+                gwAddress = asObject.address
+            } else {
+                gwAddress = nil
+            }
+        }
     }
     let data: Payload
 }

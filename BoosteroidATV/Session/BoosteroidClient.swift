@@ -296,7 +296,7 @@ actor BoosteroidClient {
             // `gw` is optional now (see the DTO). Left nil when absent rather
             // than guessed from the gateway list — see detailsIfReady for why
             // guessing was actively harmful.
-            return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI", queryString: dto.data.queryString)
+            return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gwAddress, status: "LI", queryString: dto.data.queryString)
         }
         throw BoosteroidClientError.requestFailed("session/details", "Got \(retriesOnEmptyBody + 1) consecutive empty responses (HTTP \(lastEmptyStatus)) — the session may have just been claimed by another device and hasn't settled yet. Try again in a moment.")
     }
@@ -423,7 +423,7 @@ actor BoosteroidClient {
         guard status == 200, !data.isEmpty else { return nil } // settling — keep waiting
         guard let dto = try? JSONDecoder().decode(BoosteroidSessionDetailsSuccessDTO.self, from: data) else { return nil }
 
-        if let gw = dto.data.gw, !gw.isEmpty {
+        if let gw = dto.data.gwAddress, !gw.isEmpty {
             return SessionInfo(sessionId: sessionId, nodeBaseUrl: gw, status: "LI", queryString: dto.data.queryString)
         }
         // No `gw` yet → NOT ready. Keep waiting.
