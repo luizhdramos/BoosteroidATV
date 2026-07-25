@@ -219,11 +219,11 @@ struct StreamView: View {
             // gateway list: that list is only the account's regional gateways,
             // not necessarily the machine actually assigned, and connecting to
             // the wrong one fails with "socket is not connected".
-            var session = session
+            var resolvedSession = session
             if let claimedGateway {
-                session.nodeBaseUrl = claimedGateway
+                resolvedSession.nodeBaseUrl = claimedGateway
             }
-            await controller.connect(session: session, settings: settings, cookies: cookies)
+            await controller.connect(session: resolvedSession, settings: settings, cookies: cookies)
         } catch {
             errorMessage = error.localizedDescription
         }
