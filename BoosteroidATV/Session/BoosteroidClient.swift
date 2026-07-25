@@ -208,12 +208,18 @@ actor BoosteroidClient {
     /// Surfacing the status matters: "the queue drained but nothing started"
     /// looks identical whether this endpoint is right and simply not our turn,
     /// or wrong (404 = bad path/version, 401/403 = auth, 422 = bad body).
+    /// `sessionToken` is REQUIRED (CONFIRMED: omitting it → 422 "The session
+    /// token field is required"; sending the session UUID instead → 400). It
+    /// arrives with the `queues/start` push — see
+    /// BoosteroidRealtimeClient.Event.queueReady.
     @discardableResult
-    func startStreamingSession(appId: Int, cookies: [String: String]) async -> (status: Int, body: String) {
+    func startStreamingSession(appId: Int, sessionToken: String?, cookies: [String: String]) async -> (status: Int, body: String) {
         let url = URL(string: "\(apiBase)/v2/streaming/session/start")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["appId": appId])
+        var body: [String: Any] = ["appId": appId]
+        if let sessionToken { body["sessionToken"] = sessionToken }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         guard let (data, response) = try? await session.data(for: req) else { return (0, "no response") }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let body = String(data: data.prefix(180), encoding: .utf8) ?? ""

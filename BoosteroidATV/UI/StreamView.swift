@@ -259,7 +259,7 @@ struct StreamView: View {
                             (position.map { " (position \($0))" } ?? "") + "."
                     }
                 }
-            case .queueReady(let appId):
+            case .queueReady(let appId, let sessionToken, let valueKeys):
                 // The machine-is-ready signal. Claim ONCE — this reservation is
                 // short-lived, but the endpoint is rate-limited (a retry loop
                 // earned a 429), so exactly one call, mirroring the browser's
@@ -269,10 +269,19 @@ struct StreamView: View {
                 didClaimMachine = true
                 claimResult = "Machine ready — starting…"
                 guard let cookies = try? await authManager.resolveCookies() else { continue }
-                let result = await BoosteroidClient().startStreamingSession(appId: targetAppId, cookies: cookies)
-                claimResult = (200...299).contains(result.status)
-                    ? "Machine claimed — starting…"
-                    : "Claim failed (\(result.status)). \(result.body.prefix(90))"
+                let result = await BoosteroidClient().startStreamingSession(
+                    appId: targetAppId, sessionToken: sessionToken, cookies: cookies
+                )
+                if (200...299).contains(result.status) {
+                    claimResult = "Machine claimed — starting…"
+                } else {
+                    // Include the push's field names: the claim needs a
+                    // sessionToken whose exact spelling in this payload hasn't
+                    // been observed yet, so this says where to look next.
+                    claimResult = "Claim failed (\(result.status))"
+                        + (sessionToken == nil ? " — no token in push" : " — token sent")
+                        + ". fields: [\(valueKeys.joined(separator: ","))]. \(result.body.prefix(70))"
+                }
             case .raw, .closed, .failed:
                 continue
             }

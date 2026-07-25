@@ -76,7 +76,14 @@ actor BoosteroidRealtimeClient {
         /// ONLY correct moment to claim: the reservation is short-lived, and
         /// polling the claim endpoint instead gets you rate-limited (a live
         /// 6s retry loop earned an HTTP 429 "try again in 8 min").
-        case queueReady(appId: Int?)
+        ///
+        /// The claim requires a `sessionToken` (CONFIRMED: posting without one
+        /// returns 422 "The session token field is required", and the session
+        /// UUID is NOT it — that returns 400). It isn't in any REST response we
+        /// can see, so it must ride along in this push; `sessionToken` is
+        /// extracted leniently and `valueKeys` reports the payload's actual
+        /// field names so the exact shape can be pinned down on first sight.
+        case queueReady(appId: Int?, sessionToken: String?, valueKeys: [String])
         /// Surfaced for anything not recognized as a queue update, so real
         /// device testing can capture the still-unconfirmed "ready" message
         /// shape (see header comment).
@@ -178,7 +185,11 @@ actor BoosteroidRealtimeClient {
         // waiting on" when it's absent.
         if type == "queues", action == "start" {
             let value = obj["value"] as? [String: Any]
-            continuation.yield(.queueReady(appId: Self.asInt(value?["appId"])))
+            continuation.yield(.queueReady(
+                appId: Self.asInt(value?["appId"]),
+                sessionToken: Self.extractToken(from: value, fallback: obj),
+                valueKeys: (value?.keys).map { Array($0).sorted() } ?? []
+            ))
             return
         }
         if type == "pong" { return }
@@ -188,6 +199,25 @@ actor BoosteroidRealtimeClient {
         }
         let valueDescription = (obj["value"] as Any?).map { String(describing: $0) } ?? "nil"
         continuation.yield(.raw(type: type, action: action, description: valueDescription))
+    }
+
+    /// Pulls the claim token out of a `queues/start` payload without knowing
+    /// its exact field name yet: tries the likely spellings first, then falls
+    /// back to the longest string that looks like a token (the payload also
+    /// carries small scalars like appId/position, so a length floor is enough
+    /// to avoid picking one of those).
+    private static func extractToken(from value: [String: Any]?, fallback: [String: Any]) -> String? {
+        let candidates = ["sessionToken", "session_token", "token", "streamingToken", "sessionKey", "key"]
+        for source in [value, fallback].compactMap({ $0 }) {
+            for name in candidates {
+                if let s = source[name] as? String, !s.isEmpty { return s }
+            }
+        }
+        let longest = (value ?? [:]).values
+            .compactMap { $0 as? String }
+            .filter { $0.count >= 16 }
+            .max(by: { $0.count < $1.count })
+        return longest
     }
 
     private static func asInt(_ value: Any?) -> Int? {
