@@ -185,6 +185,35 @@ actor BoosteroidClient {
         return try await fetchLastSession(cookies: cookies)
     }
 
+    /// Claims the machine once the queue clears — THE step that turns a queued
+    /// ("EN") session into a running one.
+    ///
+    /// CONFIRMED 2026-07-24 by reading the web client's own API map and service
+    /// (`startStreamingSession(appId)` → POST `{apiURIv2}/streaming/session/start`
+    /// with body `{"appId": <int>}`); its call site sits with the "your machine
+    /// is ready" confirmation modal. This is exactly the confirmation the user
+    /// clicks in the browser, and the app never sent it — which is why a queue
+    /// could drain to the front and then sit at "EN" forever: nothing ever told
+    /// the server we were there to take the machine.
+    ///
+    /// (An earlier pass concluded no such endpoint existed. That was wrong: the
+    /// bundle builds every URL from template literals, so grepping for literal
+    /// path strings found nothing.)
+    ///
+    /// Returns true on a 2xx. Errors are non-fatal to the caller: calling this
+    /// before it's genuinely our turn is expected to fail, so the poll loop just
+    /// retries on the next pass.
+    @discardableResult
+    func startStreamingSession(appId: Int, cookies: [String: String]) async -> Bool {
+        let url = URL(string: "\(apiBase)/v2/streaming/session/start")!
+        var req = authenticatedRequest(url, cookies: cookies, method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["appId": appId])
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        return (200...299).contains(status)
+    }
+
     /// CONFIRMED URL/shape: see the Session Lifecycle note above. Used both
     /// to discover the sessionId right after enqueue and to poll queue
     /// status thereafter (see pollSession).
@@ -272,6 +301,7 @@ actor BoosteroidClient {
         cookies: [String: String],
         pollIntervalNanoseconds: UInt64 = 2_000_000_000,
         setupTimeoutSeconds: TimeInterval = 180,
+        claimRetryIntervalSeconds: TimeInterval = 6,
         onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil
     ) async throws -> SessionInfo {
         guard let appId = Int(request.gameId) else {
@@ -302,6 +332,7 @@ actor BoosteroidClient {
         // assigned and details should appear within setupTimeoutSeconds.
         var attempt = 0
         var setupDeadline: Date?
+        var lastClaimAttempt = Date.distantPast
         while true {
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
             attempt += 1
@@ -316,6 +347,18 @@ actor BoosteroidClient {
             if dto.data.status == "EN" {
                 // Still in the queue — keep waiting, no deadline.
                 setupDeadline = nil
+                // CONFIRMED 2026-07-24: reaching the front of the queue is NOT
+                // enough on its own. The web client claims the machine with
+                // POST /v2/streaming/session/start (the "your machine is ready"
+                // confirmation); without it a drained queue sits at "EN"
+                // indefinitely — exactly the reported symptom. We can't see the
+                // browser's ready signal, so just retry the claim periodically:
+                // it's rejected until it's genuinely our turn, then succeeds and
+                // the very next detailsIfReady returns the gateway.
+                if Date().timeIntervalSince(lastClaimAttempt) >= claimRetryIntervalSeconds {
+                    lastClaimAttempt = Date()
+                    await startStreamingSession(appId: appId, cookies: cookies)
+                }
             } else {
                 // Left the queue but details still aren't ready: bound this.
                 let deadline = setupDeadline ?? Date().addingTimeInterval(setupTimeoutSeconds)
