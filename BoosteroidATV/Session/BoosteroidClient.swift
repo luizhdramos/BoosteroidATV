@@ -269,7 +269,12 @@ actor BoosteroidClient {
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         guard let (data, response) = try? await session.data(for: req) else { return (0, "no response") }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        let responseBody = String(data: data.prefix(180), encoding: .utf8) ?? ""
+        // Return the FULL body. It was truncated to 180 chars for display, which
+        // silently broke the caller: a real 201 body cut off mid-way through
+        // `"gateways": [{"ad…`, so it no longer parsed as JSON and the gateway
+        // address — the whole point of reading this response — was thrown away.
+        // Callers truncate for display instead.
+        let responseBody = String(data: data, encoding: .utf8) ?? ""
         return (status, responseBody)
     }
 

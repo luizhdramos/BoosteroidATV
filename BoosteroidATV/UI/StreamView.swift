@@ -381,8 +381,8 @@ struct StreamView: View {
                         // to proceed (no `gw` is ever sent while status is UN).
                         await client.setPreferredGateway(host)
                     }
-                    claimResult = "Confirmed (\(result.status), \(tokenNote)) — waiting for host…"
-                        + " body: \(result.body.isEmpty ? "<empty>" : String(result.body.prefix(90)))"
+                    claimResult = "Confirmed (\(result.status)) — "
+                        + (claimedGateway.map { "host \($0)" } ?? "NO host parsed: \(result.body.prefix(120))")
                 } else {
                     claimResult = "Confirm failed (\(result.status), \(tokenNote)): \(result.body.prefix(70))"
                 }
