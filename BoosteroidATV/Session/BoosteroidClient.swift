@@ -217,13 +217,13 @@ actor BoosteroidClient {
         let url = URL(string: "\(apiBase)/v2/streaming/session/start")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body: [String: Any] = ["appId": appId]
-        if let sessionToken { body["sessionToken"] = sessionToken }
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        var payload: [String: Any] = ["appId": appId]
+        if let sessionToken { payload["sessionToken"] = sessionToken }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         guard let (data, response) = try? await session.data(for: req) else { return (0, "no response") }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        let body = String(data: data.prefix(180), encoding: .utf8) ?? ""
-        return (status, body)
+        let responseBody = String(data: data.prefix(180), encoding: .utf8) ?? ""
+        return (status, responseBody)
     }
 
     /// CONFIRMED URL/shape: see the Session Lifecycle note above. Used both
