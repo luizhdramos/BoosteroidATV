@@ -399,7 +399,38 @@ actor BoosteroidClient {
         if status == 406 { return nil }                        // queued (or expired) — keep waiting
         guard status == 200, !data.isEmpty else { return nil } // settling — keep waiting
         guard let dto = try? JSONDecoder().decode(BoosteroidSessionDetailsSuccessDTO.self, from: data) else { return nil }
-        return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI", queryString: dto.data.queryString)
+
+        if let gw = dto.data.gw, !gw.isEmpty {
+            return SessionInfo(sessionId: sessionId, nodeBaseUrl: gw, status: "LI", queryString: dto.data.queryString)
+        }
+        // CONFIRMED 2026-07-24: after claiming a machine, details can return
+        // 200 with ONLY `queryString`. The web client handles exactly this by
+        // fetching the gateway list separately and combining it with the claim
+        // result, so do the same rather than treating it as "not ready".
+        guard let queryString = dto.data.queryString, !queryString.isEmpty,
+              let gateway = await preferredGateway(cookies: cookies) else { return nil }
+        return SessionInfo(sessionId: sessionId, nodeBaseUrl: gateway, status: "LI", queryString: queryString)
+    }
+
+    /// The account's own gateway host, from `GET /v1/streaming/gateways`
+    /// (CONFIRMED 2026-07-24). Entries flagged `priority` are the ones for the
+    /// account's region — prefer those, else fall back to the first listed.
+    /// Parsed leniently (the payload has been seen both bare and wrapped in
+    /// `data`).
+    func preferredGateway(cookies: [String: String]) async -> String? {
+        let url = URL(string: "\(apiBase)/v1/streaming/gateways")!
+        let req = authenticatedRequest(url, cookies: cookies, method: "GET")
+        guard let (data, response) = try? await session.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let root = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        let rows = (root as? [[String: Any]])
+            ?? ((root as? [String: Any])?["data"] as? [[String: Any]])
+            ?? []
+        let gateways = rows.compactMap { row -> BoosteroidGateway? in
+            guard let address = row["address"] as? String, !address.isEmpty else { return nil }
+            return BoosteroidGateway(address: address, priority: (row["priority"] as? Bool) ?? false)
+        }
+        return (gateways.first { $0.priority } ?? gateways.first)?.address
     }
 
     /// CONFIRMED URL/shape (same last-session endpoint/DTO as above). Used

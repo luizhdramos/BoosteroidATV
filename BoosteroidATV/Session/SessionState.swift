@@ -133,10 +133,25 @@ nonisolated struct BoosteroidLastSessionDTO: Codable {
 /// body (HTTP 200) — see SessionInfo doc comment above.
 nonisolated struct BoosteroidSessionDetailsSuccessDTO: Codable {
     struct Payload: Codable {
-        let gw: String
+        /// OPTIONAL as of 2026-07-24: a claimed session's details can come back
+        /// with ONLY `queryString` and no `gw` at all. This was `String` (non
+        /// optional), so decoding failed outright and the caller treated a
+        /// perfectly good response as "not ready" — the app then waited forever
+        /// on a session that was already claimed. When it's absent, resolve the
+        /// host from `/v1/streaming/gateways` instead.
+        let gw: String?
         let queryString: String?
     }
     let data: Payload
+}
+
+/// One entry of `GET /api/v1/streaming/gateways` — the per-account gateway
+/// list (CONFIRMED 2026-07-24). `priority` marks the ones for the account's
+/// own region; `/gateways/applications/{appId}` lists every gateway hosting a
+/// given game, which is a wider set.
+nonisolated struct BoosteroidGateway {
+    let address: String
+    let priority: Bool
 }
 
 /// CONFIRMED shape of `POST /api/v1/streaming/session/details`'s error body
