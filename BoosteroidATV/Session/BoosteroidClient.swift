@@ -208,17 +208,29 @@ actor BoosteroidClient {
     /// Surfacing the status matters: "the queue drained but nothing started"
     /// looks identical whether this endpoint is right and simply not our turn,
     /// or wrong (404 = bad path/version, 401/403 = auth, 422 = bad body).
-    /// `sessionToken` is REQUIRED (CONFIRMED: omitting it → 422 "The session
-    /// token field is required"; sending the session UUID instead → 400). It
-    /// arrives with the `queues/start` push — see
-    /// BoosteroidRealtimeClient.Event.queueReady.
+    /// CONFIRMED 2026-07-24 from the web client's API map: there are TWO
+    /// same-named endpoints and picking the wrong one is why this silently
+    /// failed for so long.
+    ///
+    ///   startStreamingSession   → **v1** /streaming/session/start, body {appId}
+    ///   startStreamingSessionV2 → **v2** /streaming/session/start,
+    ///                             body {appId, sessionToken}
+    ///
+    /// The "INICIAR" confirmation calls the **v1** method — just `{appId}`, no
+    /// token. We were posting to v2, which demands a `sessionToken` (422
+    /// without one), so we fed it a token guessed out of the `queues/start`
+    /// push: it answered 200 and the browser even acknowledged the switch, yet
+    /// no machine was ever assigned and `session/details` never produced a `gw`.
+    /// That is the "Confirmed (200, token ok) but it never starts" hang.
     @discardableResult
     func startStreamingSession(appId: Int, sessionToken: String?, cookies: [String: String]) async -> (status: Int, body: String) {
-        let url = URL(string: "\(apiBase)/v2/streaming/session/start")!
+        let url = URL(string: "\(apiBase)/v1/streaming/session/start")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var payload: [String: Any] = ["appId": appId]
-        if let sessionToken { payload["sessionToken"] = sessionToken }
+        // v1 takes ONLY appId. sessionToken is accepted here for signature
+        // compatibility but deliberately not sent — it belongs to the v2 route.
+        _ = sessionToken
+        let payload: [String: Any] = ["appId": appId]
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         guard let (data, response) = try? await session.data(for: req) else { return (0, "no response") }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
