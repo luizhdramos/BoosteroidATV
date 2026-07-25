@@ -263,7 +263,7 @@ actor BoosteroidClient {
         _ request: SessionCreateRequest,
         cookies: [String: String],
         pollIntervalNanoseconds: UInt64 = 2_000_000_000,
-        timeoutSeconds: TimeInterval = 600,
+        setupTimeoutSeconds: TimeInterval = 180,
         onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil
     ) async throws -> SessionInfo {
         guard let appId = Int(request.gameId) else {
@@ -283,9 +283,18 @@ actor BoosteroidClient {
         // poll for THAT — waiting for last-session to reach "LI" instead would
         // deadlock, since a session only goes "LI" once a client claims it, and
         // we don't claim (open the control socket) until after this returns.
-        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        //
+        // NO overall timeout while genuinely queued: real queues can run far
+        // longer than any fixed cap (a live example sat at position 132 with a
+        // ~1500s ETA), and a blanket 10-minute limit made the app give up on a
+        // queue that was progressing perfectly well. Instead, mirror the
+        // documented intent: wait out the queue indefinitely (the user can
+        // always cancel, which cancels this task), and only bound the SETUP
+        // phase — once last-session stops reporting "EN", a machine is being
+        // assigned and details should appear within setupTimeoutSeconds.
         var attempt = 0
-        while Date() < deadline {
+        var setupDeadline: Date?
+        while true {
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
             attempt += 1
             guard let dto = try? await fetchLastSessionDTO(cookies: cookies), dto.data.appId == appId else {
@@ -296,8 +305,21 @@ actor BoosteroidClient {
             if let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
                 return ready
             }
+            if dto.data.status == "EN" {
+                // Still in the queue — keep waiting, no deadline.
+                setupDeadline = nil
+            } else {
+                // Left the queue but details still aren't ready: bound this.
+                let deadline = setupDeadline ?? Date().addingTimeInterval(setupTimeoutSeconds)
+                setupDeadline = deadline
+                if Date() > deadline {
+                    throw BoosteroidClientError.requestFailed(
+                        "createAndAwaitSession",
+                        "The queue cleared but the machine didn't finish setting up after \(Int(setupTimeoutSeconds))s. Try again."
+                    )
+                }
+            }
         }
-        throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Still waiting for a free machine after \(Int(timeoutSeconds))s. The queue can be long — try again.")
     }
 
     /// Returns the ready `SessionInfo` (gw + queryString) when the VM is
