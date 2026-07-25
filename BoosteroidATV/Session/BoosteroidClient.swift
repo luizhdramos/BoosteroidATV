@@ -146,20 +146,28 @@ actor BoosteroidClient {
         // server never feeds the newly-switched peer). Enqueue always creates a
         // brand-new session (orphaning any other), which IS the clean "switch
         // to Apple TV" we want — the app then negotiates fresh with nobody to
-        // disrupt. The one thing we resume is our OWN still-queued ("EN")
-        // session for the same game, so re-tapping doesn't lose our place in
-        // the queue. (An earlier pass attached to "LI" sessions to "take over";
+        // disrupt. (An earlier pass attached to "LI" sessions to "take over";
         // that was the source of the black screen — see the control-socket
         // switch note in BoosteroidControlChannel.)
-        if let dto = try? await fetchLastSessionDTO(cookies: cookies),
-           dto.data.appId == Int(request.gameId),
-           dto.data.status == "EN" || dto.data.status == "LI" {
-            // Recover the existing session for this game (queued OR live) rather
-            // than enqueueing a competing one — re-launching should resume the
-            // same sessionId, and taking over a live session (moving it to the
-            // Apple TV) is the intended handoff, not a fresh queue.
-            return SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
-        }
+        //
+        // CONFIRMED 2026-07-24 — why this no longer resumes an existing "EN"
+        // session: `last-session` can sit on a stale/orphaned queued session
+        // forever, and resuming it returned here WITHOUT calling enqueue. That
+        // meant no real queue entry was ever created: the app showed "status:
+        // EN" indefinitely, no `queues/state` push ever referenced that appId,
+        // and nothing appeared in a browser session either — while OTHER games
+        // (whose appId didn't match the stale one) enqueued normally and worked.
+        // Reported and reproduced with eFootball, which had exactly such a
+        // leftover session; the resume path made it permanently unlaunchable.
+        //
+        // So: always enqueue. Enqueue always creates a brand-new session and
+        // orphans any other (CONFIRMED), which is also the clean "switch to
+        // Apple TV" this app wants — it then negotiates fresh with nobody else
+        // to disrupt. Trade-off: re-tapping a game while genuinely queued
+        // starts a new queue entry rather than resuming your place. That's the
+        // price of never getting stuck on a zombie session; a smarter version
+        // could resume only when a live `queues/state` push confirms the
+        // existing entry is real (see BoosteroidRealtimeClient).
         let url = URL(string: "\(apiBase)/v2/streaming/session/enqueue")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
