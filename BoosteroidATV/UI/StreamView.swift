@@ -31,6 +31,8 @@ struct StreamView: View {
     @State private var claimResult = ""
     /// Ensures the machine is claimed exactly once (the endpoint is rate-limited).
     @State private var didClaimMachine = false
+    /// Host named by the claim response, if any — overrides the guessed one.
+    @State private var claimedGateway: String?
     @State private var queueUpdatesSeen = 0
     @State private var seenAppIds: [Int] = []
     @State private var realtimeClient = BoosteroidRealtimeClient()
@@ -213,10 +215,46 @@ struct StreamView: View {
                     queueStatus = info.status
                 }
             )
+            // Prefer the host the claim named over the one resolved from the
+            // gateway list: that list is only the account's regional gateways,
+            // not necessarily the machine actually assigned, and connecting to
+            // the wrong one fails with "socket is not connected".
+            var session = session
+            if let claimedGateway {
+                session.nodeBaseUrl = claimedGateway
+            }
             await controller.connect(session: session, settings: settings, cookies: cookies)
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Pulls the assigned host out of the claim response. The web client reads
+    /// a `url` off that response, so look there first (and under `data`), then
+    /// any gateway-ish field, then any boosteroid host anywhere in the body.
+    /// Returns a scheme+host base URL, matching what `SessionInfo.nodeBaseUrl`
+    /// expects.
+    nonisolated static func gatewayFromClaim(_ body: String) -> String? {
+        func baseURL(_ raw: String) -> String? {
+            guard let comps = URLComponents(string: raw), let host = comps.host else { return nil }
+            let scheme = comps.scheme ?? "https"
+            if let port = comps.port { return "\(scheme)://\(host):\(port)" }
+            return "\(scheme)://\(host)"
+        }
+        if let data = body.data(using: .utf8),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let scopes = [root, root["data"] as? [String: Any]].compactMap { $0 }
+            for scope in scopes {
+                for key in ["url", "gw", "gateway", "address", "host"] {
+                    if let value = scope[key] as? String, let base = baseURL(value) { return base }
+                }
+            }
+        }
+        // Last resort: a bare host mentioned in the body.
+        if let match = body.range(of: #"https?://[a-z0-9.\-]+\.boosteroid\.com(:\d+)?"#, options: .regularExpression) {
+            return String(body[match])
+        }
+        return nil
     }
 
     /// Connects to Boosteroid's real-time WebSocket (see
@@ -273,7 +311,14 @@ struct StreamView: View {
                     appId: targetAppId, sessionToken: sessionToken, cookies: cookies
                 )
                 if (200...299).contains(result.status) {
+                    // The claim response is what the web client feeds into
+                    // opening the stream (it reads a `url` off it). Guessing the
+                    // host from the priority gateway list instead produced
+                    // "socket is not connected", so prefer whatever host the
+                    // claim itself names.
+                    claimedGateway = Self.gatewayFromClaim(result.body)
                     claimResult = "Machine claimed — starting…"
+                        + (claimedGateway.map { " (\($0))" } ?? " [no host in claim: \(result.body.prefix(70))]")
                 } else {
                     // Include the push's field names: the claim needs a
                     // sessionToken whose exact spelling in this payload hasn't
