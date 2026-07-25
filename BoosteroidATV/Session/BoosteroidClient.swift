@@ -371,12 +371,13 @@ actor BoosteroidClient {
                 current = SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
                 await onPoll?(current, attempt)
 
-                // While still queued, session/details is guaranteed to answer
-                // 406 ("timeout" = queued), so calling it is a wasted request —
-                // and wasted requests are exactly what got the account
-                // rate-limited. Only ask once the session has left the queue.
-                if dto.data.status != "EN",
-                   let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
+                // Ask details every cycle. It's the ONLY source of the gateway
+                // (CONFIRMED: a healthy session returns {queryString, gw} with
+                // gw a plain string), and skipping it while status is "EN" risks
+                // missing the transition — a session with no queue goes ready
+                // almost immediately. At the slow queued cadence this is only a
+                // few requests a minute, well clear of the rate limiter.
+                if let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
                     return ready
                 }
 

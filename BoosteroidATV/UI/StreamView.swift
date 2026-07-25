@@ -303,34 +303,24 @@ struct StreamView: View {
                 // earned a 429), so exactly one call, mirroring the browser's
                 // "INICIAR" button. `appId` may be absent in the push, in which
                 // case it's for the game we're waiting on.
+                // Do NOT call session/start here.
+                //
+                // CONFIRMED 2026-07-24 by driving a healthy session in the
+                // browser and watching every request: the web client calls ONLY
+                // enqueue, then goes straight to streaming — session/start is
+                // never sent, the session reaches status "LI", and
+                // session/details returns {queryString, gw} with gw a plain
+                // STRING ("https://sp5.cloud.boosteroid.com:443").
+                //
+                // Our calling session/start is what produced the broken state:
+                // the session went to "UN" and details then returned only
+                // queryString, with no gw ever — i.e. no machine assigned. So
+                // the ready signal is informational only; the host comes from
+                // polling details for gw.
+                _ = (sessionToken, valueKeys)
                 guard !didClaimMachine, appId == nil || appId == targetAppId else { continue }
                 didClaimMachine = true
-                claimResult = "Machine ready — starting…"
-                guard let cookies = try? await authManager.resolveCookies() else { continue }
-                let result = await BoosteroidClient().startStreamingSession(
-                    appId: targetAppId, sessionToken: sessionToken, cookies: cookies
-                )
-                if (200...299).contains(result.status) {
-                    // The claim response is what the web client feeds into
-                    // opening the stream (it reads a `url` off it). Guessing the
-                    // host from the priority gateway list instead produced
-                    // "socket is not connected", so prefer whatever host the
-                    // claim itself names.
-                    claimedGateway = Self.gatewayFromClaim(result.body)
-                    // The claim response normally names no host — that's fine
-                    // and expected: the host comes from session/details' `gw`
-                    // (an object with an `address`). Only mention the claim's
-                    // host when it actually provides one.
-                    claimResult = "Machine claimed — waiting for host…"
-                        + (claimedGateway.map { " (\($0))" } ?? "")
-                } else {
-                    // Include the push's field names: the claim needs a
-                    // sessionToken whose exact spelling in this payload hasn't
-                    // been observed yet, so this says where to look next.
-                    claimResult = "Claim failed (\(result.status))"
-                        + (sessionToken == nil ? " — no token in push" : " — token sent")
-                        + ". fields: [\(valueKeys.joined(separator: ","))]. \(result.body.prefix(70))"
-                }
+                claimResult = "Machine ready — waiting for host…"
             case .raw, .closed, .failed:
                 continue
             }
