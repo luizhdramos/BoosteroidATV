@@ -264,6 +264,15 @@ struct StreamView: View {
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let scopes = [root, root["data"] as? [String: Any]].compactMap { $0 }
             for scope in scopes {
+                // CONFIRMED: the confirmation's 201 body carries
+                // `gateways: [{address, …}]`. Prefer an entry flagged priority /
+                // active, else the first one.
+                if let gateways = scope["gateways"] as? [[String: Any]], !gateways.isEmpty {
+                    let preferred = gateways.first { ($0["priority"] as? Bool) == true }
+                        ?? gateways.first { ($0["active"] as? Bool) == true }
+                        ?? gateways[0]
+                    if let address = preferred["address"] as? String, let base = baseURL(address) { return base }
+                }
                 for key in ["url", "gw", "gateway", "address", "host"] {
                     if let value = scope[key] as? String, let base = baseURL(value) { return base }
                 }
@@ -367,6 +376,10 @@ struct StreamView: View {
                     }
                     if let host = Self.gatewayFromClaim(result.body) {
                         claimedGateway = host
+                        // Tell the waiting loop too: with the host known, a
+                        // details response carrying only queryString is enough
+                        // to proceed (no `gw` is ever sent while status is UN).
+                        await client.setPreferredGateway(host)
                     }
                     claimResult = "Confirmed (\(result.status), \(tokenNote)) — waiting for host…"
                         + " body: \(result.body.isEmpty ? "<empty>" : String(result.body.prefix(90)))"

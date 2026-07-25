@@ -43,6 +43,22 @@ actor BoosteroidClient {
         preferredSessionId = sessionId
     }
 
+    /// The streaming host, when the CONFIRMATION already told us.
+    ///
+    /// CONFIRMED 2026-07-24 from a real 201 body: `POST v2 session/start`
+    /// answers `{data: {sessionId, status: "UN", gateways: [{address, …}]}}` —
+    /// i.e. it hands over the session id AND its gateway(s) immediately. Waiting
+    /// for `session/details` to also produce a `gw` is pointless in that state:
+    /// while status is "UN" details returns ONLY `queryString`, so the app sat
+    /// at "waiting for host" until the reservation expired ("Session has been
+    /// ended by timeout"). With the gateway known, `queryString` alone is
+    /// enough to connect.
+    private var preferredGateway: String?
+
+    func setPreferredGateway(_ address: String) {
+        preferredGateway = address
+    }
+
     /// Every /api/v1 and /api/v2 call needs this — CONFIRMED (both from the
     /// /api/v1/user 401 saga and from createSession/enqueue hitting the same
     /// "Unauthenticated." error until it was routed through this): the API is
@@ -485,6 +501,12 @@ actor BoosteroidClient {
 
         if let gw = dto.data.gwAddress, !gw.isEmpty {
             return SessionInfo(sessionId: sessionId, nodeBaseUrl: gw, status: "LI", queryString: dto.data.queryString)
+        }
+        // No `gw` here, but the confirmation already named the host: that plus
+        // `queryString` is everything the control socket needs, so proceed
+        // instead of waiting for a field that never arrives in this state.
+        if let preferredGateway, let queryString = dto.data.queryString, !queryString.isEmpty {
+            return SessionInfo(sessionId: sessionId, nodeBaseUrl: preferredGateway, status: "LI", queryString: queryString)
         }
         // No `gw` yet → NOT ready. Keep waiting.
         //
