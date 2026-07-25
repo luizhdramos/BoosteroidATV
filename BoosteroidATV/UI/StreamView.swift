@@ -231,6 +231,23 @@ struct StreamView: View {
         }
     }
 
+    /// Pulls a session id out of the confirmation's 201 body. Looks at the
+    /// likely field names (top level and under `data`), then falls back to any
+    /// bare UUID in the body.
+    nonisolated static func sessionIdFromConfirm(_ body: String) -> String? {
+        if let data = body.data(using: .utf8),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let scopes = [root, root["data"] as? [String: Any]].compactMap { $0 }
+            for scope in scopes {
+                for key in ["sessionId", "session_id", "id", "sessionToken", "token"] {
+                    if let value = scope[key] as? String, value.count >= 32 { return value }
+                }
+            }
+        }
+        let uuid = #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#
+        return body.range(of: uuid, options: .regularExpression).map { String(body[$0]) }
+    }
+
     /// Pulls the assigned host out of the claim response. The web client reads
     /// a `url` off that response, so look there first (and under `data`), then
     /// any gateway-ish field, then any boosteroid host anywhere in the body.
@@ -340,9 +357,22 @@ struct StreamView: View {
                 let tokenNote = sessionToken == nil
                     ? "no token (fields: [\(valueKeys.joined(separator: ","))])"
                     : "token ok"
-                claimResult = (200...299).contains(result.status)
-                    ? "Confirmed (\(result.status), \(tokenNote)) — waiting for host…"
-                    : "Confirm failed (\(result.status), \(tokenNote)): \(result.body.prefix(70))"
+                if (200...299).contains(result.status) {
+                    // 201 Created means the server made something and described
+                    // it in the body. Polling the token alone still timed out,
+                    // so prefer any session id / gateway named here, and show
+                    // the body either way so its shape stops being a guess.
+                    if let created = Self.sessionIdFromConfirm(result.body) {
+                        await client.setPreferredSessionId(created)
+                    }
+                    if let host = Self.gatewayFromClaim(result.body) {
+                        claimedGateway = host
+                    }
+                    claimResult = "Confirmed (\(result.status), \(tokenNote)) — waiting for host…"
+                        + " body: \(result.body.isEmpty ? "<empty>" : String(result.body.prefix(90)))"
+                } else {
+                    claimResult = "Confirm failed (\(result.status), \(tokenNote)): \(result.body.prefix(70))"
+                }
             case .raw, .closed, .failed:
                 continue
             }
