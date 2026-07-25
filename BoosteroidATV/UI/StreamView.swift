@@ -317,8 +317,12 @@ struct StreamView: View {
                     // "socket is not connected", so prefer whatever host the
                     // claim itself names.
                     claimedGateway = Self.gatewayFromClaim(result.body)
-                    claimResult = "Machine claimed — starting…"
-                        + (claimedGateway.map { " (\($0))" } ?? " [no host in claim: \(result.body.prefix(70))]")
+                    // The claim response normally names no host — that's fine
+                    // and expected: the host comes from session/details' `gw`
+                    // (an object with an `address`). Only mention the claim's
+                    // host when it actually provides one.
+                    claimResult = "Machine claimed — waiting for host…"
+                        + (claimedGateway.map { " (\($0))" } ?? "")
                 } else {
                     // Include the push's field names: the claim needs a
                     // sessionToken whose exact spelling in this payload hasn't
