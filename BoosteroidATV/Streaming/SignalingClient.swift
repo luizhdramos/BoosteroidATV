@@ -136,16 +136,56 @@ final class BoosteroidSignalingClient {
         onEvent?(.connected)
     }
 
+    /// CONFIRMED 2026-07-24 (real device report): this failed with Foundation's
+    /// "The data couldn't be read because it is missing", which is
+    /// `DecodingError.keyNotFound` — NOT an empty body (that decodes to
+    /// "isn't in the correct format"). So the node answered with valid JSON that
+    /// simply had no `iceServers` key, i.e. almost certainly `{}` because the
+    /// session wasn't ready to negotiate yet.
+    ///
+    /// So a keyless/empty response is treated as "not ready, retry" rather than
+    /// a hard failure, and the final error carries the actual body so the shape
+    /// is never a guess again.
     func fetchIceServers() async throws -> [IceServer] {
-        let data = try await getWithRetryOnEmptyBody(path: "getIceServers")
-        let decoded = try JSONDecoder().decode(IceServersResponse.self, from: data)
-        return decoded.iceServers
+        var lastBody = ""
+        for attempt in 0...iceRetryCount {
+            let data = try await getWithRetryOnEmptyBody(path: "getIceServers")
+            if let decoded = try? JSONDecoder().decode(IceServersResponse.self, from: data),
+               !decoded.iceServers.isEmpty {
+                return decoded.iceServers
+            }
+            lastBody = String(data: data.prefix(200), encoding: .utf8) ?? "<non-utf8>"
+            if attempt < iceRetryCount {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+        throw SignalingError.callFailed(
+            "getIceServers never returned any ICE servers (last body: \(lastBody)). "
+            + "The node answers before it's ready to negotiate; if this persists the session "
+            + "may not actually be assigned to this host."
+        )
     }
 
+    /// Retries on the same "valid JSON but not the expected shape yet" basis as
+    /// fetchIceServers, and surfaces the real body on failure.
     func fetchParams() async throws -> StreamParams {
-        let data = try await getWithRetryOnEmptyBody(path: "getParams")
-        return try JSONDecoder().decode(StreamParams.self, from: data)
+        var lastBody = ""
+        for attempt in 0...iceRetryCount {
+            let data = try await getWithRetryOnEmptyBody(path: "getParams")
+            if let decoded = try? JSONDecoder().decode(StreamParams.self, from: data) {
+                return decoded
+            }
+            lastBody = String(data: data.prefix(200), encoding: .utf8) ?? "<non-utf8>"
+            if attempt < iceRetryCount {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+        throw SignalingError.callFailed("getParams never returned usable params (last body: \(lastBody)).")
     }
+
+    /// ~12s of patience total, matching how long a freshly-claimed session can
+    /// take to become negotiable.
+    private var iceRetryCount: Int { 7 }
 
     /// CONFIRMED 2026-07-22 (real device report): `session/details` on the
     /// main API can return HTTP 200 with an EMPTY body right after a
@@ -156,14 +196,14 @@ final class BoosteroidSignalingClient {
     /// they get the same transient-empty-body retry treatment rather than
     /// failing immediately with Foundation's generic "the data couldn't be
     /// read because it is missing" decode error.
-    private func getWithRetryOnEmptyBody(path: String, retries: Int = 3) async throws -> Data {
+    private func getWithRetryOnEmptyBody(path: String, retries: Int = 2) async throws -> Data {
         var lastStatus = 0
         for attempt in 0...retries {
             let (data, response) = try await session.data(for: authenticatedRequest(url(path)))
             if !data.isEmpty { return data }
             lastStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
             if attempt < retries {
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
         throw SignalingError.callFailed("\(path) returned an empty body \(retries + 1) times in a row (HTTP \(lastStatus)) — possibly still settling after another device claimed this session, or an auth/session problem talking to the streaming node.")
