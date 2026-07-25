@@ -19,15 +19,6 @@ struct SettingsView: View {
                               selection: $viewModel.streamSettings.resolution)
                     OptionRow(title: "FPS", options: fpsOptions,
                               selection: $viewModel.streamSettings.fps)
-                    HStack {
-                        Text("Codec")
-                        Spacer()
-                        Text("H.264")
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("Higher resolution/FPS depend on your Boosteroid plan and connection. Codec is fixed to H.264 — it's the only format Boosteroid delivers over its WebRTC path (H.265 and AV1 only ship over its native app's UDP transport).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section("Bitrate") {
                     Toggle("Automatic bitrate", isOn: $viewModel.streamSettings.automaticBitrate)
@@ -55,9 +46,6 @@ struct SettingsView: View {
                 }
                 Section("Overlay") {
                     Toggle("Performance overlay", isOn: $viewModel.streamSettings.showStatsOverlay)
-                    Text("Shows bitrate, Stream FPS and latency while playing. Off by default.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section("Account") {
                     Button("Sign Out", role: .destructive) { authManager.logout() }

@@ -4,7 +4,6 @@ struct MainTabView: View {
     @Environment(AuthManager.self) var authManager
     @State private var viewModel = GamesViewModel()
     @State private var gameToPlay: GameInfo?
-    @State private var selectedTab = 0
     /// Drives the launch confirmation alert.
     @State private var launchAlert: LaunchAlert?
 
@@ -19,24 +18,12 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            Tab("Home", systemImage: "house.fill", value: 0) {
+        TabView {
+            Tab("Home", systemImage: "house.fill") {
                 HomeView(games: viewModel.library, onPlay: { launchAlert = .confirm($0) })
             }
-            Tab("Settings", systemImage: "gearshape.fill", value: 1) {
+            Tab("Settings", systemImage: "gearshape.fill") {
                 SettingsView()
-            }
-        }
-        // Pinned brand mark: an overlay on the TabView (not inside a tab's
-        // scrolling content), so it stays fixed at the tab-bar height instead
-        // of scrolling away with the games grid when tvOS collapses the tab
-        // bar. Home only; decorative (never steals focus).
-        .overlay(alignment: .topLeading) {
-            if selectedTab == 0 {
-                BrandHeader(compact: true)
-                    .padding(.leading, 60)
-                    .padding(.top, 12)
-                    .allowsHitTesting(false)
             }
         }
         .environment(viewModel)

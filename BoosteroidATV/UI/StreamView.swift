@@ -127,14 +127,15 @@ struct StreamView: View {
                     .foregroundStyle(.secondary)
                 HStack(spacing: 24) {
                     Button("Resume") { showOverlay = false }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
                         .tint(.orange)
                     Button("Leave Game") {
                         controller.disconnect()
                         onDismiss()
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .tint(.red)
+                    .foregroundStyle(.white)
                 }
             }
             .padding(48)
