@@ -27,6 +27,8 @@ struct StreamView: View {
     /// Diagnostics for "some games never show a queue position" — see
     /// watchQueuePosition().
     @State private var queueDebug = ""
+    /// Last result of the session/start "claim the machine" call.
+    @State private var claimResult = ""
     @State private var queueUpdatesSeen = 0
     @State private var seenAppIds: [Int] = []
     @State private var realtimeClient = BoosteroidRealtimeClient()
@@ -76,6 +78,13 @@ struct StreamView: View {
                                     Text(queueDebug)
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
+                                }
+                                if !claimResult.isEmpty {
+                                    Text(claimResult)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 60)
                                 }
                             }
                         }
@@ -195,6 +204,12 @@ struct StreamView: View {
                 onPoll: { info, attempt in
                     queueAttempt = attempt
                     queueStatus = info.status
+                },
+                // Surface what the "claim the machine" call actually returned —
+                // a drained queue that never starts looks the same whether the
+                // claim is simply early or the request itself is being rejected.
+                onClaim: { status, body in
+                    claimResult = "claim \(status)" + (body.isEmpty ? "" : ": \(body.prefix(90))")
                 }
             )
             await controller.connect(session: session, settings: settings, cookies: cookies)

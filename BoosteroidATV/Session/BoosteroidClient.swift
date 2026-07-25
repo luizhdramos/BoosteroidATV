@@ -200,18 +200,24 @@ actor BoosteroidClient {
     /// bundle builds every URL from template literals, so grepping for literal
     /// path strings found nothing.)
     ///
-    /// Returns true on a 2xx. Errors are non-fatal to the caller: calling this
-    /// before it's genuinely our turn is expected to fail, so the poll loop just
-    /// retries on the next pass.
+    /// Returns the HTTP status (0 on transport failure) plus a short body
+    /// excerpt, so callers can SHOW what the claim actually did. Calling this
+    /// before it's genuinely our turn is expected to fail, so the poll loop
+    /// just retries on the next pass.
+    ///
+    /// Surfacing the status matters: "the queue drained but nothing started"
+    /// looks identical whether this endpoint is right and simply not our turn,
+    /// or wrong (404 = bad path/version, 401/403 = auth, 422 = bad body).
     @discardableResult
-    func startStreamingSession(appId: Int, cookies: [String: String]) async -> Bool {
+    func startStreamingSession(appId: Int, cookies: [String: String]) async -> (status: Int, body: String) {
         let url = URL(string: "\(apiBase)/v2/streaming/session/start")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["appId": appId])
-        guard let (_, response) = try? await session.data(for: req) else { return false }
+        guard let (data, response) = try? await session.data(for: req) else { return (0, "no response") }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        return (200...299).contains(status)
+        let body = String(data: data.prefix(180), encoding: .utf8) ?? ""
+        return (status, body)
     }
 
     /// CONFIRMED URL/shape: see the Session Lifecycle note above. Used both
@@ -302,7 +308,8 @@ actor BoosteroidClient {
         pollIntervalNanoseconds: UInt64 = 2_000_000_000,
         setupTimeoutSeconds: TimeInterval = 180,
         claimRetryIntervalSeconds: TimeInterval = 6,
-        onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil
+        onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil,
+        onClaim: (@MainActor @Sendable (Int, String) -> Void)? = nil
     ) async throws -> SessionInfo {
         guard let appId = Int(request.gameId) else {
             throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Invalid game id \(request.gameId)")
@@ -357,7 +364,8 @@ actor BoosteroidClient {
                 // the very next detailsIfReady returns the gateway.
                 if Date().timeIntervalSince(lastClaimAttempt) >= claimRetryIntervalSeconds {
                     lastClaimAttempt = Date()
-                    await startStreamingSession(appId: appId, cookies: cookies)
+                    let result = await startStreamingSession(appId: appId, cookies: cookies)
+                    await onClaim?(result.status, result.body)
                 }
             } else {
                 // Left the queue but details still aren't ready: bound this.
