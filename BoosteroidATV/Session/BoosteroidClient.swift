@@ -320,7 +320,14 @@ actor BoosteroidClient {
     func createAndAwaitSession(
         _ request: SessionCreateRequest,
         cookies: [String: String],
-        pollIntervalNanoseconds: UInt64 = 2_000_000_000,
+        // CONFIRMED THE HARD WAY 2026-07-24: polling last-session AND
+        // session/details every 2s got the whole account rate-limited (HTTP 429
+        // "Too many requests. Try again in 15min." — on a plain GET). The web
+        // client does not poll like this: queue progress arrives over the
+        // realtime socket (`queues/state`) and the "machine ready" moment over
+        // `queues/start`. So REST polling here is only a slow safety net.
+        queuedPollIntervalNanoseconds: UInt64 = 15_000_000_000,
+        setupPollIntervalNanoseconds: UInt64 = 3_000_000_000,
         setupTimeoutSeconds: TimeInterval = 180,
         onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil
     ) async throws -> SessionInfo {
@@ -352,8 +359,12 @@ actor BoosteroidClient {
         // assigned and details should appear within setupTimeoutSeconds.
         var attempt = 0
         var setupDeadline: Date?
+        // Slow while queued, quicker once a machine is being assigned. Keeping
+        // the queued cadence slow is what stops us tripping the rate limiter on
+        // long waits; the realtime socket is what actually notices progress.
+        var interval = queuedPollIntervalNanoseconds
         while true {
-            try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+            try await Task.sleep(nanoseconds: interval)
             attempt += 1
             // NOTE: this used to `guard ... else { continue }` on last-session
             // matching our appId, which silently skipped the rest of the loop —
@@ -365,12 +376,21 @@ actor BoosteroidClient {
             if let dto, dto.data.appId == appId {
                 current = SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
                 await onPoll?(current, attempt)
-                if let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
+
+                // While still queued, session/details is guaranteed to answer
+                // 406 ("timeout" = queued), so calling it is a wasted request —
+                // and wasted requests are exactly what got the account
+                // rate-limited. Only ask once the session has left the queue.
+                if dto.data.status != "EN",
+                   let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
                     return ready
                 }
+
                 if dto.data.status == "EN" {
                     setupDeadline = nil // Still queued — keep waiting, no deadline.
+                    interval = queuedPollIntervalNanoseconds
                 } else {
+                    interval = setupPollIntervalNanoseconds
                     // Left the queue but details still aren't ready: bound this.
                     let deadline = setupDeadline ?? Date().addingTimeInterval(setupTimeoutSeconds)
                     setupDeadline = deadline
