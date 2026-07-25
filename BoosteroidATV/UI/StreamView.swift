@@ -12,6 +12,10 @@ struct StreamView: View {
     let onDismiss: () -> Void
 
     @Environment(AuthManager.self) var authManager
+    /// Used only to name an unexpected appId seen in a queue push (see
+    /// watchQueuePosition) — tells "another game's queue" apart from "the
+    /// same game under a different id".
+    @Environment(GamesViewModel.self) var gamesViewModel
     @State private var controller = StreamController()
     @State private var showOverlay = false
     @State private var errorMessage: String?
@@ -214,17 +218,31 @@ struct StreamView: View {
             if Task.isCancelled { break }
             switch event {
             case .queueUpdate(let appId, let position, let eta):
-                // Diagnostic: record every queue push we see, matching or not.
-                // If a game never shows a position, this distinguishes "the
-                // server pushes nothing for this session" (likely a stale/
-                // orphaned EN session we attached to) from "it pushes under a
-                // different appId" (a filter mismatch here).
                 queueUpdatesSeen += 1
                 if !seenAppIds.contains(appId) { seenAppIds.append(appId) }
-                queueDebug = "pushes: \(queueUpdatesSeen) · appIds seen: \(seenAppIds.map(String.init).joined(separator: ",")) · want: \(targetAppId)"
-                guard appId == targetAppId else { continue }
-                queuePosition = position
-                queueEta = eta
+
+                if appId == targetAppId {
+                    queuePosition = position
+                    queueEta = eta
+                    queueDebug = ""
+                    continue
+                }
+
+                // CONFIRMED (see BoosteroidRealtimeClient): these pushes cover
+                // every queue the account is in, including leftovers from games
+                // launched earlier that keep counting down. If we're only
+                // hearing about OTHER games, say so plainly — that other queue
+                // is usually the one actually holding the account's slot, which
+                // is why this game seems stuck with no position.
+                if queuePosition == nil {
+                    let others = seenAppIds
+                        .filter { $0 != targetAppId }
+                        .map { id in gamesViewModel.library.first { Int($0.id) == id }?.title ?? "app \(id)" }
+                    if let other = others.last {
+                        queueDebug = "No queue position reported for this game. You're also queued for \(other)" +
+                            (position.map { " (position \($0))" } ?? "") + "."
+                    }
+                }
             case .raw, .closed, .failed:
                 continue
             }

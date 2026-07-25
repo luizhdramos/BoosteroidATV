@@ -47,18 +47,25 @@ import Foundation
 // CONFIRMED handling from the same bundle: `action === "closed"` (with a
 // specific `value` enum member) means the token was rejected and needs
 // refreshing; `type === "pong"` is a heartbeat reply to a client-sent ping.
-// CONFIRMED (from the app's own NgRx state shape in `chunk-MH64ZJOD.js`)
-// that queue-position pushes carry `value: {appId, eta, position}` — but
-// the exact `type`/`action` string used to ROUTE that specific message was
-// never captured (the lazy-loaded chunk containing that effect never
-// loaded on any page visited during this investigation, only the reducer
-// shape did). This client therefore pattern-matches generically: any
-// message whose `value` is an object containing both `appId` and
-// `position` is treated as a queue update, regardless of its `type`/
-// `action`. Anything else is surfaced via `.raw` — not needed for the app
-// to function (see NOTE above), but useful if a future pass wants to
-// display richer queue state (ETA formatting, "your turn" push notices,
-// etc.) than what last-session's plain EN/LI status offers.
+// CONFIRMED 2026-07-24 BY LIVE CAPTURE of this socket (an earlier pass knew
+// only the `value: {appId, eta, position}` shape, from the app's NgRx state
+// in `chunk-MH64ZJOD.js`, and could not observe the routing): queue pushes
+// are
+//   {"type":"queues","action":"state","value":{position, appId, eta}}
+// arriving about once a second while queued, with `position` and `eta`
+// (seconds) counting down — e.g. {appId: 2715, position: 90, eta: 1076}.
+//
+// IMPORTANT, also confirmed by that capture: these pushes are per-APP and
+// cover EVERY queue the account is standing in — including leftovers from
+// previously launched games, which keep counting down after you launch
+// something else. So a push's appId frequently is NOT the game currently
+// being launched; callers must match on appId (see StreamView). Equally,
+// some games produce no queue push at all (eFootball was observed sitting
+// at last-session "EN" with no `queues/state` message ever referencing it),
+// so a missing position is not necessarily a bug.
+//
+// Anything else is surfaced via `.raw` — not needed for the app to function
+// (see NOTE above), but useful for a future pass wanting richer queue state.
 actor BoosteroidRealtimeClient {
     enum Event {
         case queueUpdate(appId: Int, position: Int?, eta: Int?)
@@ -139,11 +146,20 @@ actor BoosteroidRealtimeClient {
         let type = obj["type"] as? String
         let action = obj["action"] as? String
 
-        // Lenient on purpose: a real message carrying this shape has never
-        // actually been observed (see header comment) — only inferred from
-        // NgRx state — so this tolerates appId/position/eta arriving as
-        // either JSON numbers or numeric strings rather than assuming.
-        if let value = obj["value"] as? [String: Any], let appId = Self.asInt(value["appId"]) {
+        // CONFIRMED 2026-07-24 from a live capture of this very socket (the
+        // routing that the header comment says was never observed — now it
+        // has been): queue pushes are
+        //   {"type":"queues","action":"state","value":{position,appId,eta}}
+        // e.g. value {appId: 2715, position: 90, eta: 1076}, arriving roughly
+        // once a second with position/eta counting down.
+        //
+        // Matching on type/action (rather than "any message with a value.appId",
+        // as an earlier lenient pass did) matters: other messages also carry an
+        // appId and were being misread as queue updates. Number parsing stays
+        // lenient since only one account/session shape has been observed.
+        if type == "queues", action == "state",
+           let value = obj["value"] as? [String: Any],
+           let appId = Self.asInt(value["appId"]) {
             continuation.yield(.queueUpdate(appId: appId, position: Self.asInt(value["position"]), eta: Self.asInt(value["eta"])))
             return
         }
