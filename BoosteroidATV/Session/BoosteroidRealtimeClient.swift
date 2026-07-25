@@ -69,6 +69,14 @@ import Foundation
 actor BoosteroidRealtimeClient {
     enum Event {
         case queueUpdate(appId: Int, position: Int?, eta: Int?)
+        /// CONFIRMED 2026-07-24: `{"type":"queues","action":"start"}` — the
+        /// server saying "a machine is reserved for you". This is what makes
+        /// the web client show its "machine found / INICIAR" prompt, and
+        /// confirming there POSTs /v2/streaming/session/start. So this is the
+        /// ONLY correct moment to claim: the reservation is short-lived, and
+        /// polling the claim endpoint instead gets you rate-limited (a live
+        /// 6s retry loop earned an HTTP 429 "try again in 8 min").
+        case queueReady(appId: Int?)
         /// Surfaced for anything not recognized as a queue update, so real
         /// device testing can capture the still-unconfirmed "ready" message
         /// shape (see header comment).
@@ -161,6 +169,16 @@ actor BoosteroidRealtimeClient {
            let value = obj["value"] as? [String: Any],
            let appId = Self.asInt(value["appId"]) {
             continuation.yield(.queueUpdate(appId: appId, position: Self.asInt(value["position"]), eta: Self.asInt(value["eta"])))
+            return
+        }
+        // CONFIRMED 2026-07-24 from the client's own action vocabulary
+        // (queues: added / state / start / removed / canceled): "start" is the
+        // machine-is-ready signal. `value` may or may not carry the appId, so
+        // it's optional here — the caller can fall back to "the game we're
+        // waiting on" when it's absent.
+        if type == "queues", action == "start" {
+            let value = obj["value"] as? [String: Any]
+            continuation.yield(.queueReady(appId: Self.asInt(value?["appId"])))
             return
         }
         if type == "pong" { return }

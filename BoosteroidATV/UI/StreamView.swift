@@ -29,6 +29,8 @@ struct StreamView: View {
     @State private var queueDebug = ""
     /// Last result of the session/start "claim the machine" call.
     @State private var claimResult = ""
+    /// Ensures the machine is claimed exactly once (the endpoint is rate-limited).
+    @State private var didClaimMachine = false
     @State private var queueUpdatesSeen = 0
     @State private var seenAppIds: [Int] = []
     @State private var realtimeClient = BoosteroidRealtimeClient()
@@ -209,12 +211,6 @@ struct StreamView: View {
                 onPoll: { info, attempt in
                     queueAttempt = attempt
                     queueStatus = info.status
-                },
-                // Surface what the "claim the machine" call actually returned —
-                // a drained queue that never starts looks the same whether the
-                // claim is simply early or the request itself is being rejected.
-                onClaim: { status, body in
-                    claimResult = "claim \(status)" + (body.isEmpty ? "" : ": \(body.prefix(90))")
                 }
             )
             await controller.connect(session: session, settings: settings, cookies: cookies)
@@ -263,6 +259,20 @@ struct StreamView: View {
                             (position.map { " (position \($0))" } ?? "") + "."
                     }
                 }
+            case .queueReady(let appId):
+                // The machine-is-ready signal. Claim ONCE — this reservation is
+                // short-lived, but the endpoint is rate-limited (a retry loop
+                // earned a 429), so exactly one call, mirroring the browser's
+                // "INICIAR" button. `appId` may be absent in the push, in which
+                // case it's for the game we're waiting on.
+                guard !didClaimMachine, appId == nil || appId == targetAppId else { continue }
+                didClaimMachine = true
+                claimResult = "Machine ready — starting…"
+                guard let cookies = try? await authManager.resolveCookies() else { continue }
+                let result = await BoosteroidClient().startStreamingSession(appId: targetAppId, cookies: cookies)
+                claimResult = (200...299).contains(result.status)
+                    ? "Machine claimed — starting…"
+                    : "Claim failed (\(result.status)). \(result.body.prefix(90))"
             case .raw, .closed, .failed:
                 continue
             }

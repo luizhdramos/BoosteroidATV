@@ -307,9 +307,7 @@ actor BoosteroidClient {
         cookies: [String: String],
         pollIntervalNanoseconds: UInt64 = 2_000_000_000,
         setupTimeoutSeconds: TimeInterval = 180,
-        claimRetryIntervalSeconds: TimeInterval = 6,
-        onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil,
-        onClaim: (@MainActor @Sendable (Int, String) -> Void)? = nil
+        onPoll: (@MainActor @Sendable (SessionInfo, Int) -> Void)? = nil
     ) async throws -> SessionInfo {
         guard let appId = Int(request.gameId) else {
             throw BoosteroidClientError.requestFailed("createAndAwaitSession", "Invalid game id \(request.gameId)")
@@ -339,7 +337,6 @@ actor BoosteroidClient {
         // assigned and details should appear within setupTimeoutSeconds.
         var attempt = 0
         var setupDeadline: Date?
-        var lastClaimAttempt = Date.distantPast
         while true {
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
             attempt += 1
@@ -374,22 +371,13 @@ actor BoosteroidClient {
                 await onPoll?(SessionInfo(sessionId: current.sessionId, nodeBaseUrl: nil, status: status), attempt)
             }
 
-            // CONFIRMED 2026-07-24: reaching the front of the queue is NOT
-            // enough on its own — the web client claims the machine with
-            // POST /v2/streaming/session/start (that's what its "machine found,
-            // INICIAR" prompt sends), and the reservation is RELEASED if nobody
-            // claims it in time (observed live: the prompt lapsed and the whole
-            // session was dropped). Without this the app sat at "EN" forever.
-            //
-            // Claim on a fixed interval regardless of what last-session says:
-            // the call is keyed only by appId, exactly like the browser button,
-            // and it's simply rejected until it's genuinely our turn — at which
-            // point the next detailsIfReady returns the gateway.
-            if Date().timeIntervalSince(lastClaimAttempt) >= claimRetryIntervalSeconds {
-                lastClaimAttempt = Date()
-                let result = await startStreamingSession(appId: appId, cookies: cookies)
-                await onClaim?(result.status, result.body)
-            }
+            // NOTE: do NOT claim (POST session/start) from this loop. An earlier
+            // pass retried the claim every 6s here and earned an HTTP 429
+            // "too many requests, try again in 8 min" — that endpoint is not
+            // meant to be polled. The web client calls it exactly once, when
+            // the realtime socket pushes `queues/start` ("a machine is reserved
+            // for you"). StreamView listens for that and claims once; see
+            // BoosteroidRealtimeClient.Event.queueReady.
         }
     }
 
