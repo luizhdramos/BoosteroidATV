@@ -31,6 +31,11 @@ struct MainTabView: View {
             }
             .padding(.top, 24)
             .padding(.bottom, 12)
+            // focusSection makes the bar a first-class focus target, so
+            // pressing up from anywhere in the content below reliably returns
+            // focus here. Without it, focus can get trapped in the content
+            // (notably Settings' form) with no way back to the tabs.
+            .focusSection()
 
             Group {
                 switch tab {
@@ -41,6 +46,20 @@ struct MainTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Soft fade at the top (and a touch at the bottom) so content
+            // dissolves as it scrolls past the fixed bar instead of being cut
+            // off by a hard edge.
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: 0.06),
+                        .init(color: .black, location: 0.94),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
         }
         .background(BoosteroidTheme.background.ignoresSafeArea())
         .environment(viewModel)

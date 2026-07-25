@@ -12,16 +12,22 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var viewModel = viewModel
-        NavigationStack {
-            Form {
-                Section("Stream Quality") {
+        // Plain ScrollView with hand-built sections instead of `Form`: on the
+        // app's dark background Form's own chrome/section headers rendered
+        // dark-on-dark and became unreadable. Explicit colors here guarantee
+        // contrast. No navigation title either — the top bar already says
+        // "Settings".
+        ScrollView {
+            VStack(alignment: .leading, spacing: 36) {
+                section("Stream Quality") {
                     OptionRow(title: "Resolution", options: resolutions,
                               selection: $viewModel.streamSettings.resolution)
                     OptionRow(title: "FPS", options: fpsOptions,
                               selection: $viewModel.streamSettings.fps)
                 }
-                Section("Bitrate") {
+                section("Bitrate") {
                     Toggle("Automatic bitrate", isOn: $viewModel.streamSettings.automaticBitrate)
+                        .foregroundStyle(.white)
                     if !viewModel.streamSettings.automaticBitrate {
                         StepperRow(
                             title: "Max bitrate",
@@ -31,7 +37,7 @@ struct SettingsView: View {
                         )
                     }
                 }
-                Section("Controller") {
+                section("Controller") {
                     StepperRow(
                         title: "Deadzone",
                         value: "\(Int(viewModel.streamSettings.controllerDeadzone * 100))%",
@@ -39,14 +45,39 @@ struct SettingsView: View {
                         onIncrease: { viewModel.streamSettings.controllerDeadzone = min(0.5, viewModel.streamSettings.controllerDeadzone + 0.05) }
                     )
                 }
-                Section("Overlay") {
+                section("Overlay") {
                     Toggle("Performance overlay", isOn: $viewModel.streamSettings.showStatsOverlay)
+                        .foregroundStyle(.white)
                 }
-                Section("Account") {
-                    Button("Sign Out", role: .destructive) { authManager.logout() }
+                section("Account") {
+                    Button("Sign Out") { authManager.logout() }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
                 }
             }
-            .navigationTitle("Settings")
+            .frame(maxWidth: 1100, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 60)
+            .padding(.vertical, 24)
+        }
+    }
+
+    /// One titled settings group: a bright header over its rows on a subtle
+    /// translucent card, so both stay legible on the dark page background.
+    @ViewBuilder
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title.uppercased())
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .tracking(2)
+                .foregroundStyle(.white.opacity(0.6))
+            VStack(alignment: .leading, spacing: 20) {
+                content()
+            }
+            .foregroundStyle(.white)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
     }
 }
@@ -73,7 +104,7 @@ private struct StepperRow: View {
             .buttonStyle(.bordered)
             Text(value)
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.75))
                 .frame(minWidth: 130)
                 .multilineTextAlignment(.center)
             Button(action: onIncrease) {
