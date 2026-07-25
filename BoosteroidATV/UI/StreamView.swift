@@ -64,8 +64,13 @@ struct StreamView: View {
                         // real-world behavior: queue position can rise as
                         // well as fall (higher-tier accounts join ahead),
                         // even on a paid account, so this can take a while.
-                        if queueAttempt > 0 || queuePosition != nil {
-                            VStack(spacing: 8) {
+                        // Always shown while connecting. Previously gated on
+                        // queueAttempt > 0, which hid EVERYTHING whenever the
+                        // poll loop was silently skipping (see the
+                        // last-session mismatch note in BoosteroidClient) —
+                        // leaving just "Connecting…" with no explanation.
+                        VStack(spacing: 8) {
+                            Group {
                                 if let queuePosition {
                                     Text("Queue position: \(queuePosition)" + (queueEta.map { " — ~\($0)s" } ?? ""))
                                         .font(.subheadline)

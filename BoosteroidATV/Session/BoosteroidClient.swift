@@ -343,40 +343,52 @@ actor BoosteroidClient {
         while true {
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
             attempt += 1
-            guard let dto = try? await fetchLastSessionDTO(cookies: cookies), dto.data.appId == appId else {
-                continue
-            }
-            current = SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
-            await onPoll?(current, attempt)
-            if let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
-                return ready
-            }
-            if dto.data.status == "EN" {
-                // Still in the queue — keep waiting, no deadline.
-                setupDeadline = nil
-                // CONFIRMED 2026-07-24: reaching the front of the queue is NOT
-                // enough on its own. The web client claims the machine with
-                // POST /v2/streaming/session/start (the "your machine is ready"
-                // confirmation); without it a drained queue sits at "EN"
-                // indefinitely — exactly the reported symptom. We can't see the
-                // browser's ready signal, so just retry the claim periodically:
-                // it's rejected until it's genuinely our turn, then succeeds and
-                // the very next detailsIfReady returns the gateway.
-                if Date().timeIntervalSince(lastClaimAttempt) >= claimRetryIntervalSeconds {
-                    lastClaimAttempt = Date()
-                    let result = await startStreamingSession(appId: appId, cookies: cookies)
-                    await onClaim?(result.status, result.body)
+            // NOTE: this used to `guard ... else { continue }` on last-session
+            // matching our appId, which silently skipped the rest of the loop —
+            // including onPoll — whenever last-session came back empty or for
+            // another game. The UI then showed only "Connecting…" with no
+            // status at all (reported), and, worse, the claim below never ran.
+            // Report every outcome instead.
+            let dto = try? await fetchLastSessionDTO(cookies: cookies)
+            if let dto, dto.data.appId == appId {
+                current = SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
+                await onPoll?(current, attempt)
+                if let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
+                    return ready
+                }
+                if dto.data.status == "EN" {
+                    setupDeadline = nil // Still queued — keep waiting, no deadline.
+                } else {
+                    // Left the queue but details still aren't ready: bound this.
+                    let deadline = setupDeadline ?? Date().addingTimeInterval(setupTimeoutSeconds)
+                    setupDeadline = deadline
+                    if Date() > deadline {
+                        throw BoosteroidClientError.requestFailed(
+                            "createAndAwaitSession",
+                            "The queue cleared but the machine didn't finish setting up after \(Int(setupTimeoutSeconds))s. Try again."
+                        )
+                    }
                 }
             } else {
-                // Left the queue but details still aren't ready: bound this.
-                let deadline = setupDeadline ?? Date().addingTimeInterval(setupTimeoutSeconds)
-                setupDeadline = deadline
-                if Date() > deadline {
-                    throw BoosteroidClientError.requestFailed(
-                        "createAndAwaitSession",
-                        "The queue cleared but the machine didn't finish setting up after \(Int(setupTimeoutSeconds))s. Try again."
-                    )
-                }
+                let status = dto == nil ? "no session yet" : "another game is queued"
+                await onPoll?(SessionInfo(sessionId: current.sessionId, nodeBaseUrl: nil, status: status), attempt)
+            }
+
+            // CONFIRMED 2026-07-24: reaching the front of the queue is NOT
+            // enough on its own — the web client claims the machine with
+            // POST /v2/streaming/session/start (that's what its "machine found,
+            // INICIAR" prompt sends), and the reservation is RELEASED if nobody
+            // claims it in time (observed live: the prompt lapsed and the whole
+            // session was dropped). Without this the app sat at "EN" forever.
+            //
+            // Claim on a fixed interval regardless of what last-session says:
+            // the call is keyed only by appId, exactly like the browser button,
+            // and it's simply rejected until it's genuinely our turn — at which
+            // point the next detailsIfReady returns the gateway.
+            if Date().timeIntervalSince(lastClaimAttempt) >= claimRetryIntervalSeconds {
+                lastClaimAttempt = Date()
+                let result = await startStreamingSession(appId: appId, cookies: cookies)
+                await onClaim?(result.status, result.body)
             }
         }
     }
