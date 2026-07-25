@@ -27,6 +27,12 @@ struct BoosteroidATVApp: App {
                 }
             }
             .environment(authManager)
+            // The whole app is drawn on a dark background, so declare the dark
+            // color scheme instead of colouring labels by hand. This makes the
+            // system's default label colors light when unfocused, while still
+            // letting focused controls use their automatic dark-on-white
+            // inversion — forcing colors manually broke one state or the other.
+            .preferredColorScheme(.dark)
             .onAppear { registerBGTasks() }
             .task { await authManager.initialize() }
         }

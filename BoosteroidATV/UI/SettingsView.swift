@@ -68,7 +68,7 @@ struct SettingsView: View {
             Text(title.uppercased())
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .tracking(2)
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.secondary)
             // NOTE: deliberately no blanket .foregroundStyle(.white) here.
             // On tvOS a focused button/toggle fills white and the system
             // inverts its label to dark; forcing white would override that
@@ -99,7 +99,6 @@ private struct StepperRow: View {
     var body: some View {
         HStack(spacing: 16) {
             Text(title)
-                .foregroundStyle(.white)
             Spacer()
             Button(action: onDecrease) {
                 Image(systemName: "minus")
@@ -107,7 +106,7 @@ private struct StepperRow: View {
             .buttonStyle(.bordered)
             Text(value)
                 .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(.secondary)
                 .frame(minWidth: 130)
                 .multilineTextAlignment(.center)
             Button(action: onIncrease) {
@@ -129,7 +128,6 @@ private struct OptionRow<Value: Hashable>: View {
     var body: some View {
         HStack(spacing: 16) {
             Text(title)
-                .foregroundStyle(.white)
             Spacer()
             ForEach(options, id: \.1) { label, value in
                 Button(label) { selection = value }
