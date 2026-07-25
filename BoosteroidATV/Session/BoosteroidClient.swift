@@ -293,7 +293,11 @@ actor BoosteroidClient {
             // this reuses it rather than inventing a synthetic marker.
             // queryString is now actually used — see SessionInfo's doc
             // comment and BoosteroidControlChannel.
-            return SessionInfo(sessionId: sessionId, nodeBaseUrl: dto.data.gw, status: "LI", queryString: dto.data.queryString)
+            // `gw` is optional now (see the DTO): when it's missing the host
+            // comes from the gateway list instead — same fallback as
+            // detailsIfReady.
+            let gateway = dto.data.gw ?? (await preferredGateway(cookies: cookies))
+            return SessionInfo(sessionId: sessionId, nodeBaseUrl: gateway, status: "LI", queryString: dto.data.queryString)
         }
         throw BoosteroidClientError.requestFailed("session/details", "Got \(retriesOnEmptyBody + 1) consecutive empty responses (HTTP \(lastEmptyStatus)) — the session may have just been claimed by another device and hasn't settled yet. Try again in a moment.")
     }
