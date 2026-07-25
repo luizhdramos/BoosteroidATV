@@ -36,6 +36,9 @@ struct StreamView: View {
     @State private var queueUpdatesSeen = 0
     @State private var seenAppIds: [Int] = []
     @State private var realtimeClient = BoosteroidRealtimeClient()
+    /// One shared client so the queues/start token can redirect the readiness
+    /// polling that start() is already running (see setPreferredSessionId).
+    @State private var client = BoosteroidClient()
 
     var body: some View {
         ZStack {
@@ -200,7 +203,6 @@ struct StreamView: View {
         }
         do {
             let cookies = try await authManager.resolveCookies()
-            let client = BoosteroidClient()
             // createAndAwaitSession enqueues, then polls the CONFIRMED
             // last-session endpoint (EN = queued, LI = active) until ready
             // or 180s elapses, then fetches session/details for the real
@@ -321,7 +323,15 @@ struct StreamView: View {
                 didClaimMachine = true
                 claimResult = "Machine ready — confirming…"
                 guard let cookies = try? await authManager.resolveCookies() else { continue }
-                let result = await BoosteroidClient().startStreamingSession(
+
+                // The token IS the real session's id. last-session keeps
+                // reporting a stale one, so redirect readiness polling here or
+                // we'd wait forever on a session that will never get a machine.
+                if let sessionToken {
+                    await client.setPreferredSessionId(sessionToken)
+                }
+
+                let result = await client.startStreamingSession(
                     appId: targetAppId, sessionToken: sessionToken, cookies: cookies
                 )
                 // Report the token/fields either way: the exact spelling of the

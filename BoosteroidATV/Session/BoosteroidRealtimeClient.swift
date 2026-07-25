@@ -207,7 +207,10 @@ actor BoosteroidRealtimeClient {
     /// carries small scalars like appId/position, so a length floor is enough
     /// to avoid picking one of those).
     private static func extractToken(from value: [String: Any]?, fallback: [String: Any]) -> String? {
-        let candidates = ["sessionToken", "session_token", "token", "streamingToken", "sessionKey", "key"]
+        // CONFIRMED 2026-07-24 by live capture: the field is literally `token`
+        // and carries a 36-char UUID — `queues/start → {appId, token}`. The
+        // other spellings are kept only as defensive fallbacks.
+        let candidates = ["token", "sessionToken", "session_token", "streamingToken", "sessionKey", "key"]
         for source in [value, fallback].compactMap({ $0 }) {
             for name in candidates {
                 if let s = source[name] as? String, !s.isEmpty { return s }

@@ -23,6 +23,26 @@ actor BoosteroidClient {
 
     private let apiBase = "https://cloud.boosteroid.com/api"
 
+    /// The session id to ask `session/details` about, when it differs from what
+    /// `last-session` reports.
+    ///
+    /// CONFIRMED 2026-07-24 and the root cause of the long "waiting for host"
+    /// hang: `last-session` is a STALE record. After a fresh enqueue it kept
+    /// returning an OLD session's id and `"EN"` (even a `dequeue` didn't clear
+    /// it, and `active-sessions` said 0), while the real, new session is the one
+    /// identified by the `token` in the `queues/start` push. We were polling
+    /// `session/details` with the stale id, so it never produced a `gw` no
+    /// matter how long we waited — the machine had been assigned to the OTHER
+    /// session all along.
+    private var preferredSessionId: String?
+
+    /// Point subsequent readiness polling at the session the server actually
+    /// created (the `queues/start` token). Called by StreamView the moment that
+    /// push arrives.
+    func setPreferredSessionId(_ sessionId: String) {
+        preferredSessionId = sessionId
+    }
+
     /// Every /api/v1 and /api/v2 call needs this — CONFIRMED (both from the
     /// /api/v1/user 401 saga and from createSession/enqueue hitting the same
     /// "Unauthenticated." error until it was routed through this): the API is
@@ -208,29 +228,28 @@ actor BoosteroidClient {
     /// Surfacing the status matters: "the queue drained but nothing started"
     /// looks identical whether this endpoint is right and simply not our turn,
     /// or wrong (404 = bad path/version, 401/403 = auth, 422 = bad body).
-    /// CONFIRMED 2026-07-24 from the web client's API map: there are TWO
-    /// same-named endpoints and picking the wrong one is why this silently
-    /// failed for so long.
+    /// Confirms a reserved machine — the "INICIAR" button's request.
     ///
-    ///   startStreamingSession   → **v1** /streaming/session/start, body {appId}
-    ///   startStreamingSessionV2 → **v2** /streaming/session/start,
-    ///                             body {appId, sessionToken}
+    /// CONFIRMED 2026-07-24. Two same-named endpoints exist:
+    ///   v1 /streaming/session/start, body {appId}
+    ///   v2 /streaming/session/start, body {appId, sessionToken}
+    /// v1 is a DIFFERENT feature — starting a game without queueing — and it is
+    /// refused here: `400 "Direct session start not allowed."` So the post-queue
+    /// confirmation is **v2, and the token is mandatory**.
     ///
-    /// The "INICIAR" confirmation calls the **v1** method — just `{appId}`, no
-    /// token. We were posting to v2, which demands a `sessionToken` (422
-    /// without one), so we fed it a token guessed out of the `queues/start`
-    /// push: it answered 200 and the browser even acknowledged the switch, yet
-    /// no machine was ever assigned and `session/details` never produced a `gw`.
-    /// That is the "Confirmed (200, token ok) but it never starts" hang.
+    /// The token comes from the `queues/start` push, whose field is literally
+    /// `token` (a 36-char UUID) — captured live:
+    ///   queues/added → {appId}
+    ///   queues/start → {appId, token}
+    /// It is NOT the same id `last-session` reports; see
+    /// `setPreferredSessionId` for why that matters.
     @discardableResult
     func startStreamingSession(appId: Int, sessionToken: String?, cookies: [String: String]) async -> (status: Int, body: String) {
-        let url = URL(string: "\(apiBase)/v1/streaming/session/start")!
+        let url = URL(string: "\(apiBase)/v2/streaming/session/start")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // v1 takes ONLY appId. sessionToken is accepted here for signature
-        // compatibility but deliberately not sent — it belongs to the v2 route.
-        _ = sessionToken
-        let payload: [String: Any] = ["appId": appId]
+        var payload: [String: Any] = ["appId": appId]
+        if let sessionToken { payload["sessionToken"] = sessionToken }
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         guard let (data, response) = try? await session.data(for: req) else { return (0, "no response") }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -383,6 +402,27 @@ actor BoosteroidClient {
             // another game. The UI then showed only "Connecting…" with no
             // status at all (reported), and, worse, the claim below never ran.
             // Report every outcome instead.
+            // Once the queues/start token is known it supersedes last-session
+            // entirely (that record is stale — see setPreferredSessionId), so
+            // poll details on the token directly and don't wait for
+            // last-session to agree.
+            if let preferredSessionId {
+                await onPoll?(SessionInfo(sessionId: preferredSessionId, nodeBaseUrl: nil, status: "confirmed"), attempt)
+                if let ready = try await detailsIfReady(sessionId: preferredSessionId, cookies: cookies) {
+                    return ready
+                }
+                interval = setupPollIntervalNanoseconds
+                let deadline = setupDeadline ?? Date().addingTimeInterval(setupTimeoutSeconds)
+                setupDeadline = deadline
+                if Date() > deadline {
+                    throw BoosteroidClientError.requestFailed(
+                        "createAndAwaitSession",
+                        "The machine was confirmed but never became ready after \(Int(setupTimeoutSeconds))s. Try again."
+                    )
+                }
+                continue
+            }
+
             let dto = try? await fetchLastSessionDTO(cookies: cookies)
             if let dto, dto.data.appId == appId {
                 current = SessionInfo(sessionId: dto.data.sessionId, nodeBaseUrl: nil, status: dto.data.status)
