@@ -30,11 +30,6 @@ struct SettingsView: View {
                             onIncrease: { viewModel.streamSettings.manualBitrateMbps += 5 }
                         )
                     }
-                    Text(viewModel.streamSettings.automaticBitrate
-                         ? "Bitrate is chosen automatically from your resolution, like the official Boosteroid client."
-                         : "Manually cap the stream bitrate between 3 and 80 Mbps.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section("Controller") {
                     StepperRow(

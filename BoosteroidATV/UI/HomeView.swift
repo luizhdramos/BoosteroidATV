@@ -9,36 +9,32 @@ struct HomeView: View {
     let onPlay: (GameInfo) -> Void
 
     var body: some View {
-        // NavigationStack so the tab bar sits at the top with content below it,
-        // consistent with the Settings tab (a bare full-screen view lets its
-        // content bleed up under the tab bar).
-        NavigationStack {
-            ScrollView {
-                Group {
-                    if games.isEmpty {
-                        ContentUnavailableView(
-                            "No games yet",
-                            systemImage: "gamecontroller",
-                            description: Text("Boosteroid's catalog API hasn't been wired up yet.")
-                        )
-                        .padding(.top, 120)
-                    } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 24)], spacing: 24) {
-                            ForEach(games) { game in
-                                Button { onPlay(game) } label: {
-                                    coverArt(for: game)
-                                        .aspectRatio(1, contentMode: .fit)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                }
-                                .buttonStyle(.card)
+        // Just the scrolling grid — MainTabView provides the fixed top bar and
+        // the page background.
+        ScrollView {
+            Group {
+                if games.isEmpty {
+                    ContentUnavailableView(
+                        "No games yet",
+                        systemImage: "gamecontroller",
+                        description: Text("Boosteroid's catalog API hasn't been wired up yet.")
+                    )
+                    .padding(.top, 120)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 24)], spacing: 24) {
+                        ForEach(games) { game in
+                            Button { onPlay(game) } label: {
+                                coverArt(for: game)
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
+                            .buttonStyle(.card)
                         }
                     }
                 }
-                .padding(.horizontal, 40)
-                .padding(.vertical, 40)
             }
-            .background(BoosteroidTheme.background.ignoresSafeArea())
+            .padding(.horizontal, 40)
+            .padding(.vertical, 24)
         }
     }
 
