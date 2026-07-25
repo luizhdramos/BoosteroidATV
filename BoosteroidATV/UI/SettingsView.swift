@@ -27,7 +27,6 @@ struct SettingsView: View {
                 }
                 section("Bitrate") {
                     Toggle("Automatic bitrate", isOn: $viewModel.streamSettings.automaticBitrate)
-                        .foregroundStyle(.white)
                     if !viewModel.streamSettings.automaticBitrate {
                         StepperRow(
                             title: "Max bitrate",
@@ -47,7 +46,6 @@ struct SettingsView: View {
                 }
                 section("Overlay") {
                     Toggle("Performance overlay", isOn: $viewModel.streamSettings.showStatsOverlay)
-                        .foregroundStyle(.white)
                 }
                 section("Account") {
                     Button("Sign Out") { authManager.logout() }
@@ -71,10 +69,14 @@ struct SettingsView: View {
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .tracking(2)
                 .foregroundStyle(.white.opacity(0.6))
+            // NOTE: deliberately no blanket .foregroundStyle(.white) here.
+            // On tvOS a focused button/toggle fills white and the system
+            // inverts its label to dark; forcing white would override that
+            // inversion and render white-on-white. Plain labels set their own
+            // color individually instead.
             VStack(alignment: .leading, spacing: 20) {
                 content()
             }
-            .foregroundStyle(.white)
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
@@ -97,6 +99,7 @@ private struct StepperRow: View {
     var body: some View {
         HStack(spacing: 16) {
             Text(title)
+                .foregroundStyle(.white)
             Spacer()
             Button(action: onDecrease) {
                 Image(systemName: "minus")
@@ -126,6 +129,7 @@ private struct OptionRow<Value: Hashable>: View {
     var body: some View {
         HStack(spacing: 16) {
             Text(title)
+                .foregroundStyle(.white)
             Spacer()
             ForEach(options, id: \.1) { label, value in
                 Button(label) { selection = value }
