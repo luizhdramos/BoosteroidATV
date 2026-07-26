@@ -520,6 +520,7 @@ actor BoosteroidClient {
         // the queued cadence slow is what stops us tripping the rate limiter on
         // long waits; the realtime socket is what actually notices progress.
         var interval = queuedPollIntervalNanoseconds
+        var reactedToConfirmation = false
         while true {
             // Sleep in slices instead of one long block.
             //
@@ -536,7 +537,11 @@ actor BoosteroidClient {
             while slept < interval {
                 try await Task.sleep(nanoseconds: min(slice, interval - slept))
                 slept += slice
-                if preferredSessionId != nil { break }
+                // Cut the wait short ONLY for the confirmation itself, and only
+                // once. Without the `!reactedToConfirmation` guard every later
+                // iteration would also break at the first 2s slice, quietly
+                // polling faster than the setup cadence asks for.
+                if preferredSessionId != nil && !reactedToConfirmation { break }
             }
             attempt += 1
             // NOTE: this used to `guard ... else { continue }` on last-session
@@ -550,6 +555,7 @@ actor BoosteroidClient {
             // poll details on the token directly and don't wait for
             // last-session to agree.
             if let preferredSessionId {
+                reactedToConfirmation = true
                 await onPoll?(SessionInfo(sessionId: preferredSessionId, nodeBaseUrl: nil, status: "confirmed"), attempt)
                 if let ready = try await detailsIfReady(sessionId: preferredSessionId, cookies: cookies) {
                     return ready
