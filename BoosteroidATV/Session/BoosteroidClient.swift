@@ -199,10 +199,13 @@ actor BoosteroidClient {
         // so the previous session has to be given up rather than left running
         // alongside the new one.
         //
-        // Best-effort by design: `dequeue` is CONFIRMED to answer 204 and to
-        // release a QUEUE slot. Whether it also tears down a fully LIVE session
-        // is NOT confirmed — if it doesn't, this is still no worse than before,
-        // and the next run will show it.
+        // `dequeue` alone was NOT enough (reported: the previous machine stayed
+        // bound and the new session's node refused to negotiate). It releases a
+        // queue slot; a RUNNING session also has to be torn down on its own
+        // node. Do both, in that order, best-effort.
+        if let existing = try? await fetchLastSessionDTO(cookies: cookies) {
+            await hangUpSession(sessionId: existing.data.sessionId, cookies: cookies)
+        }
         await dequeue(cookies: cookies)
 
         // Standalone-first (CONFIRMED 2026-07-23): the app must stream its OWN
@@ -267,6 +270,36 @@ actor BoosteroidClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         guard let (_, response) = try? await session.data(for: req) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 204
+    }
+
+    /// Tears a LIVE session down on its own streaming node.
+    ///
+    /// `dequeue` alone was NOT enough (reported): switching games still left the
+    /// previous machine bound, so the new session reached "LI" but its node
+    /// refused to negotiate. `dequeue` releases a queue slot; a running session
+    /// has to be ended where it actually lives — on the node, via the signaling
+    /// helper's own `hangup` (the endpoint list in webrtcstreamer.js is
+    /// getIceServers / getParams / call / addIceCandidate / getIceCandidate /
+    /// hangup).
+    ///
+    /// Best-effort and UNVERIFIED: `hangup`'s exact parameters were never
+    /// captured, so this mirrors the `call` convention (peerid + sessionId). If
+    /// it turns out to be wrong the launch is no worse off than before.
+    @discardableResult
+    func hangUpSession(sessionId: String, cookies: [String: String]) async -> Bool {
+        // The node address only comes from details, and only while the session
+        // is still alive — which is exactly the case we're trying to end.
+        guard let details = try? await detailsIfReady(sessionId: sessionId, cookies: cookies),
+              let nodeBaseUrl = details.nodeBaseUrl else { return false }
+        var comps = URLComponents(string: "\(nodeBaseUrl)/webrtc/api/hangup")!
+        comps.queryItems = [
+            URLQueryItem(name: "peerid", value: String(Double.random(in: 0..<1))),
+            URLQueryItem(name: "sessionId", value: sessionId),
+        ]
+        guard let url = comps.url else { return false }
+        let req = authenticatedRequest(url, cookies: cookies, method: "POST")
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        return (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 
     /// Claims the machine once the queue clears — THE step that turns a queued
@@ -468,7 +501,23 @@ actor BoosteroidClient {
         // long waits; the realtime socket is what actually notices progress.
         var interval = queuedPollIntervalNanoseconds
         while true {
-            try await Task.sleep(nanoseconds: interval)
+            // Sleep in slices instead of one long block.
+            //
+            // The queued cadence is deliberately slow (60s) to stay clear of the
+            // rate limiter, but the confirmation arrives out-of-band on the
+            // realtime socket — and a single 60s sleep meant the loop could sit
+            // idle for most of a minute AFTER the machine was already confirmed.
+            // That is the reported "confirm happens, then 30-40s of nothing
+            // before the control channel starts": not the VM booting, just us
+            // not looking. Slicing keeps the REST cadence identical (what the
+            // limiter cares about) while reacting to the confirmation at once.
+            let slice: UInt64 = 2_000_000_000
+            var slept: UInt64 = 0
+            while slept < interval {
+                try await Task.sleep(nanoseconds: min(slice, interval - slept))
+                slept += slice
+                if preferredSessionId != nil { break }
+            }
             attempt += 1
             // NOTE: this used to `guard ... else { continue }` on last-session
             // matching our appId, which silently skipped the rest of the loop —
