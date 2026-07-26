@@ -21,6 +21,9 @@ struct StreamView: View {
     @State private var showOverlay = false
     /// Siri Remote touch surface acts as a mouse (see VideoSurfaceView).
     @State private var pointerMode = false
+    /// Dead-reckoned pointer offset from centre, used only while the server
+    /// reports no cursor position of its own.
+    @State private var localCursor: CGPoint = .zero
     @State private var showKeyboard = false
     @State private var errorMessage: String?
     @State private var queueAttempt = 0
@@ -117,12 +120,23 @@ struct StreamView: View {
                     // on-screen keyboard's keys can't be selected.
                     showOverlay: showOverlay || showKeyboard,
                     onMenu: { showOverlay.toggle() },
-                    pointerMode: pointerMode
+                    pointerMode: pointerMode,
+                    onPointerMoved: { dx, dy in
+                        localCursor.x += dx
+                        localCursor.y += dy
+                    }
                 )
                 .ignoresSafeArea()
                 // Compact performance overlay — only when enabled in Settings.
                 if settings.showStatsOverlay {
                     statsOverlay
+                }
+                // The remote desktop's pointer isn't drawn into the video, so
+                // without this pointer mode moved an invisible cursor. Prefer
+                // the server's reported position; fall back to tracking our own
+                // movement locally (approximate, but better than nothing).
+                if pointerMode {
+                    pointerCursor
                 }
                 if showKeyboard {
                     VirtualKeyboardView(
@@ -150,6 +164,38 @@ struct StreamView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             controller.disconnect()
         }
+    }
+
+    /// A drawn pointer for pointer mode.
+    ///
+    /// Boosteroid does NOT composite the remote cursor into the video (its web
+    /// client draws it from separate updates — see the `.cursor` note in
+    /// BoosteroidControlChannel), so nothing was visible at all. If the server
+    /// reports a position we place the pointer there, scaled from remote-desktop
+    /// pixels; otherwise it follows our own dead-reckoning of the movement we've
+    /// sent, which can drift and is only a stopgap.
+    private var pointerCursor: some View {
+        GeometryReader { geo in
+            let remote = CGSize(
+                width: max(1, CGFloat(controller.stats.resolutionWidth)),
+                height: max(1, CGFloat(controller.stats.resolutionHeight))
+            )
+            let point: CGPoint = {
+                if let server = controller.serverCursor, controller.stats.resolutionWidth > 0 {
+                    return CGPoint(x: server.x / remote.width * geo.size.width,
+                                   y: server.y / remote.height * geo.size.height)
+                }
+                return CGPoint(x: geo.size.width / 2 + localCursor.x,
+                               y: geo.size.height / 2 + localCursor.y)
+            }()
+            Image(systemName: "cursorarrow")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.9), radius: 3)
+                .position(x: min(max(point.x, 0), geo.size.width),
+                          y: min(max(point.y, 0), geo.size.height))
+        }
+        .allowsHitTesting(false)
     }
 
     /// Discreet single-line performance overlay pinned to the top-left edge:

@@ -27,6 +27,10 @@ final class VideoSurfaceView: UIView {
     /// Called when the user presses the Menu button on the Siri Remote.
     var menuPressHandler: (() -> Void)?
 
+    /// Mirrors each relative mouse delta we send, so the UI can draw a pointer
+    /// while the server reports no cursor position of its own.
+    var pointerMovedHandler: ((CGFloat, CGFloat) -> Void)?
+
     /// When true, an extended gamepad owns input.
     var gamepadModeActive = false
 
@@ -107,6 +111,7 @@ final class VideoSurfaceView: UIView {
             let sy = Int16(clamping: Int(dy * scale))
             guard sx != 0 || sy != 0 else { return }
             inputHandler?.sendMouseMove(dx: sx, dy: sy)
+            pointerMovedHandler?(CGFloat(sx), CGFloat(sy))
         case .ended, .cancelled, .failed:
             lastPanTranslation = .zero
         default:
@@ -378,11 +383,14 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
     /// Siri Remote touch surface drives the mouse pointer; centre click sends
     /// the left button.
     var pointerMode: Bool = false
+    /// Each relative mouse delta sent, mirrored so the UI can draw a pointer.
+    var onPointerMoved: (CGFloat, CGFloat) -> Void = { _, _ in }
 
     func makeUIViewController(context: Context) -> StreamingViewController {
         let vc = StreamingViewController()
         vc.videoSurface.menuPressHandler = onMenu
         vc.videoSurface.pointerModeActive = pointerMode
+        vc.videoSurface.pointerMovedHandler = onPointerMoved
         Task { @MainActor in
             streamController.bindVideoView(vc.videoSurface)
         }
@@ -393,6 +401,7 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
         vc.videoSurface.videoTrack = streamController.videoTrack
         vc.videoSurface.menuPressHandler = onMenu
         vc.videoSurface.pointerModeActive = pointerMode
+        vc.videoSurface.pointerMovedHandler = onPointerMoved
         vc.controllerUserInteractionEnabled = showOverlay
         vc.videoSurface.overlayVisible = showOverlay
     }

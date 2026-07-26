@@ -79,6 +79,13 @@ final class StreamController: NSObject {
     private(set) var controllerCount = 0
     private(set) var controllerEventsSent = 0
     private(set) var controllerAckId: String = "-"
+    /// Cursor position reported by the server, in remote-desktop pixels.
+    /// nil until (or unless) the server sends one — see the `.cursor` note in
+    /// BoosteroidControlChannel.
+    private(set) var serverCursor: CGPoint?
+    /// Field names of the last cursor message, so an unrecognised shape can be
+    /// identified from a real session instead of guessed at.
+    private(set) var cursorFields: [String] = []
 
     private var peerConnection: LKRTCPeerConnection?
     /// CONFIRMED 2026-07-23: Boosteroid's webrtcstreamer.js always creates a
@@ -210,6 +217,9 @@ final class StreamController: NSObject {
                     if !self.didStartWebRTC { await self.startWebRTCMedia(client: client) }
                 case .raw(let type, let action):
                     self.controlLog.append("\(type ?? "?")/\(action ?? "?")")
+                case .cursor(let x, let y, _, let fields):
+                    self.cursorFields = fields
+                    if let x, let y { self.serverCursor = CGPoint(x: x, y: y) }
                 case .controllerAck(let name, _):
                     self.controlLog.append("controller connected: \(name)")
                 case .failed(let message):

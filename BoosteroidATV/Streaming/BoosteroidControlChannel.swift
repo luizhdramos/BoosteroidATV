@@ -126,6 +126,17 @@ actor BoosteroidControlChannel {
         /// the server re-syncs this burst but does NOT re-send settings/webrtc
         /// — CONFIRMED via a live switch test).
         case sessionActive
+        /// Cursor state pushed by the server.
+        ///
+        /// The remote desktop's pointer is NOT composited into the video — the
+        /// web client draws it itself (hence `cursor_zip` in the status
+        /// handshake, and its `cursor-mode-manager.js`). A client that ignores
+        /// these messages shows no cursor at all, which is exactly what pointer
+        /// mode did on first try.
+        ///
+        /// Shape not captured yet, so x/y are parsed leniently and `fields`
+        /// reports what actually arrived, letting one real session pin it down.
+        case cursor(x: Int?, y: Int?, visible: Bool?, fields: [String])
         case controllerAck(name: String, id: String)
         case controllerRumble(id: String, left: Double, right: Double)
         case raw(type: String?, action: String?)
@@ -259,6 +270,19 @@ actor BoosteroidControlChannel {
         let type = obj["type"] as? String
         let action = obj["action"] as? String
 
+        // Cursor updates: matched loosely (by type OR action, and by the mere
+        // presence of coordinates) because the exact routing hasn't been
+        // captured — better to over-match here than to silently drop the only
+        // thing that can put a pointer on screen.
+        if type == "cursor" || action == "cursor"
+            || (type == "mouse" && obj["x"] != nil)
+            || (obj["cursorX"] != nil) {
+            let x = Self.asInt(obj["x"]) ?? Self.asInt(obj["cursorX"]) ?? Self.asInt(obj["posX"])
+            let y = Self.asInt(obj["y"]) ?? Self.asInt(obj["cursorY"]) ?? Self.asInt(obj["posY"])
+            let visible = (obj["visible"] as? Bool) ?? (obj["show"] as? Bool)
+            continuation.yield(.cursor(x: x, y: y, visible: visible, fields: obj.keys.sorted()))
+            return
+        }
         if type == "controller", action == "connected",
            let name = obj["name"] as? String, let id = Self.stringValue(obj["id"]) {
             continuation.yield(.controllerAck(name: name, id: id))
