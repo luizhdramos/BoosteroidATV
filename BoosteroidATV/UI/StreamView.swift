@@ -19,6 +19,9 @@ struct StreamView: View {
     @Environment(GamesViewModel.self) var gamesViewModel
     @State private var controller = StreamController()
     @State private var showOverlay = false
+    /// Siri Remote touch surface acts as a mouse (see VideoSurfaceView).
+    @State private var pointerMode = false
+    @State private var showKeyboard = false
     @State private var errorMessage: String?
     @State private var queueAttempt = 0
     @State private var queueStatus = ""
@@ -108,13 +111,26 @@ struct StreamView: View {
                     }
                 }
             case .streaming:
-                VideoSurfaceViewRepresentable(streamController: controller, showOverlay: showOverlay, onMenu: { showOverlay.toggle() })
-                    .ignoresSafeArea()
+                VideoSurfaceViewRepresentable(
+                    streamController: controller,
+                    // Focus must reach SwiftUI whenever an overlay is up, or the
+                    // on-screen keyboard's keys can't be selected.
+                    showOverlay: showOverlay || showKeyboard,
+                    onMenu: { showOverlay.toggle() },
+                    pointerMode: pointerMode
+                )
+                .ignoresSafeArea()
                 // Compact performance overlay — only when enabled in Settings.
                 if settings.showStatsOverlay {
                     statsOverlay
                 }
-                if showOverlay {
+                if showKeyboard {
+                    VirtualKeyboardView(
+                        inputHandler: controller.inputSender,
+                        onClose: { showKeyboard = false }
+                    )
+                    .padding(40)
+                } else if showOverlay {
                     overlay
                 }
             case .disconnected(let reason):
@@ -174,6 +190,20 @@ struct StreamView: View {
                     Button("Resume") { showOverlay = false }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
+                    // Typing and pointing are the two things a gamepad can't do
+                    // — needed for launchers, logins and in-game search.
+                    Button("Keyboard") {
+                        showOverlay = false
+                        showKeyboard = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.gray)
+                    Button(pointerMode ? "Pointer: On" : "Pointer: Off") {
+                        pointerMode.toggle()
+                        showOverlay = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(pointerMode ? .green : .gray)
                     Button("Leave Game") {
                         controller.disconnect()
                         onDismiss()

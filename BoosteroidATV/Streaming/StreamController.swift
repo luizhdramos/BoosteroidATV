@@ -88,7 +88,7 @@ final class StreamController: NSObject {
     /// isn't deallocated.
     private var clientDataChannel: LKRTCDataChannel?
     private var signaling: BoosteroidSignalingClient?
-    private var inputSender: InputSender?
+    private(set) var inputSender: InputSender?
     private let controlChannel = BoosteroidControlChannel()
     private var controlChannelTask: Task<Void, Never>?
     private var watchdogTasks: [Task<Void, Never>] = []

@@ -30,6 +30,16 @@ final class VideoSurfaceView: UIView {
     /// When true, an extended gamepad owns input.
     var gamepadModeActive = false
 
+    /// When true, the Siri Remote's touch surface drives the mouse pointer and
+    /// the centre click sends a left button. Off by default so the remote keeps
+    /// behaving as a gamepad for normal play.
+    var pointerModeActive = false {
+        didSet { pointerPanRecognizer?.isEnabled = pointerModeActive }
+    }
+    private weak var pointerPanRecognizer: UIPanGestureRecognizer?
+    /// Last pan translation, so movement can be sent as deltas.
+    private var lastPanTranslation: CGPoint = .zero
+
     /// Tracks whether the pause overlay is currently visible.
     var overlayVisible: Bool = false
 
@@ -66,6 +76,42 @@ final class VideoSurfaceView: UIView {
             displayLayer.controlTimebase = tb
         }
         renderer.displayLayer = displayLayer
+        setupPointerGesture()
+    }
+
+    /// A pan recognizer over the Siri Remote's touch surface, translated into
+    /// RELATIVE mouse movement — the same shape `InputSender.sendMouseMove`
+    /// already speaks, so nothing new is needed on the protocol side.
+    private func setupPointerGesture() {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePointerPan(_:)))
+        pan.isEnabled = false // only while pointer mode is on
+        addGestureRecognizer(pan)
+        pointerPanRecognizer = pan
+    }
+
+    @objc private func handlePointerPan(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            lastPanTranslation = .zero
+        case .changed:
+            let translation = gesture.translation(in: self)
+            // Deltas, not absolute positions: the surface reports a running
+            // translation, so subtract what was already sent.
+            let dx = translation.x - lastPanTranslation.x
+            let dy = translation.y - lastPanTranslation.y
+            lastPanTranslation = translation
+            // Scale down: a full swipe across the small touch surface would
+            // otherwise fling the cursor across a 4K desktop.
+            let scale: CGFloat = 0.35
+            let sx = Int16(clamping: Int(dx * scale))
+            let sy = Int16(clamping: Int(dy * scale))
+            guard sx != 0 || sy != 0 else { return }
+            inputHandler?.sendMouseMove(dx: sx, dy: sy)
+        case .ended, .cancelled, .failed:
+            lastPanTranslation = .zero
+        default:
+            break
+        }
     }
 
     override func didMoveToWindow() {
@@ -88,6 +134,10 @@ final class VideoSurfaceView: UIView {
                 // itself handles closing (Resume / exit-command).
                 menuPressHandler?()
                 handled = true
+            } else if pointerModeActive && press.type == .select {
+                // Centre click = left mouse button while pointing.
+                inputHandler?.sendMouseButton(down: true, button: 0)
+                handled = true
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
                 inputHandler?.sendKeyEvent(
                     down: true,
@@ -104,7 +154,10 @@ final class VideoSurfaceView: UIView {
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
-            if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
+            if pointerModeActive && press.type == .select {
+                inputHandler?.sendMouseButton(down: false, button: 0)
+                handled = true
+            } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
                 inputHandler?.sendKeyEvent(
                     down: false,
                     vk: mapping.vk,
@@ -322,10 +375,14 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
     /// Called when the user presses Menu or Play/Pause on the remote — used to
     /// open the in-stream pause menu (the way back Home).
     var onMenu: () -> Void = {}
+    /// Siri Remote touch surface drives the mouse pointer; centre click sends
+    /// the left button.
+    var pointerMode: Bool = false
 
     func makeUIViewController(context: Context) -> StreamingViewController {
         let vc = StreamingViewController()
         vc.videoSurface.menuPressHandler = onMenu
+        vc.videoSurface.pointerModeActive = pointerMode
         Task { @MainActor in
             streamController.bindVideoView(vc.videoSurface)
         }
@@ -335,6 +392,7 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: StreamingViewController, context: Context) {
         vc.videoSurface.videoTrack = streamController.videoTrack
         vc.videoSurface.menuPressHandler = onMenu
+        vc.videoSurface.pointerModeActive = pointerMode
         vc.controllerUserInteractionEnabled = showOverlay
         vc.videoSurface.overlayVisible = showOverlay
     }
