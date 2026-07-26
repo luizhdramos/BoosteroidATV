@@ -174,6 +174,22 @@ actor BoosteroidClient {
     // you want to show the user a live number while they do.
 
     func createSession(_ request: SessionCreateRequest, cookies: [String: String]) async throws -> SessionInfo {
+        // RESUME a session that is genuinely still running, so leaving the app
+        // and coming back returns to the game instead of re-queueing.
+        //
+        // The test is deliberately NOT last-session's status: that record is
+        // stale (it reported "EN" for sessions that no longer existed, survived
+        // a dequeue, and made eFootball permanently unlaunchable when an earlier
+        // pass trusted it). The definitive proof a session is real AND has a
+        // machine is `session/details` answering 200 with a `gw` — a stale or
+        // expired entry answers 406 "timeout" instead, so a zombie can never
+        // hijack the launch here.
+        if let dto = try? await fetchLastSessionDTO(cookies: cookies),
+           dto.data.appId == Int(request.gameId),
+           let live = try? await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
+            return live
+        }
+
         // Standalone-first (CONFIRMED 2026-07-23): the app must stream its OWN
         // fresh session so it is the SOLE WebRTC negotiator. It must NOT "take
         // over" a session another device is already streaming: opening our
@@ -387,6 +403,11 @@ actor BoosteroidClient {
         }
         var current = try await createSession(request, cookies: cookies)
         await onPoll?(current, 0)
+        // createSession resumes a still-running session when there is one, and
+        // that already carries the host — go straight back into the game.
+        if current.nodeBaseUrl != nil {
+            return current
+        }
         // The VM may already be ready (no queue), in which case session/details
         // returns a gw straight away.
         if let ready = try await detailsIfReady(sessionId: current.sessionId, cookies: cookies) {

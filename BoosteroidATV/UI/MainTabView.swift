@@ -86,11 +86,10 @@ struct MainTabView: View {
         } message: { alert in
             switch alert {
             case .confirm:
-                // The app streams its own fresh session (see
-                // BoosteroidClient.createSession) — so this starts a new session
-                // (and may wait in a queue), and stops the game if it's open on
-                // another device.
-                Text("This starts a new session for this game (you may wait in a queue). If it's open on another device, that one will stop.")
+                // createSession resumes a session that's genuinely still running
+                // (proven by session/details returning a gateway) and otherwise
+                // queues a new one.
+                Text("If this game is still running, you'll pick up where you left off — including a session open on another device, which will move here. Otherwise a new session starts and you may wait in a queue.")
             }
         }
     }
