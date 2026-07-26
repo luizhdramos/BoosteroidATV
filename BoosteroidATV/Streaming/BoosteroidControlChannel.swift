@@ -351,6 +351,15 @@ actor BoosteroidControlChannel {
         }
     }
 
+    /// Lenient number parsing for incoming JSON: cursor coordinates have been
+    /// seen as numbers, but nothing guarantees they aren't strings.
+    private static func asInt(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let d = value as? Double { return Int(d) }
+        if let s = value as? String { return Int(s) }
+        return nil
+    }
+
     private static func stringValue(_ value: Any?) -> String? {
         if let s = value as? String { return s }
         if let i = value as? Int { return String(i) }
