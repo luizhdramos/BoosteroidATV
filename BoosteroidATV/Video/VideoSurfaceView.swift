@@ -38,9 +38,13 @@ final class VideoSurfaceView: UIView {
     /// the centre click sends a left button. Off by default so the remote keeps
     /// behaving as a gamepad for normal play.
     var pointerModeActive = false {
-        didSet { pointerPanRecognizer?.isEnabled = pointerModeActive }
+        didSet {
+            pointerPanRecognizer?.isEnabled = pointerModeActive
+            pointerTapRecognizer?.isEnabled = pointerModeActive
+        }
     }
     private weak var pointerPanRecognizer: UIPanGestureRecognizer?
+    private weak var pointerTapRecognizer: UITapGestureRecognizer?
     /// Last pan translation, so movement can be sent as deltas.
     private var lastPanTranslation: CGPoint = .zero
 
@@ -91,6 +95,26 @@ final class VideoSurfaceView: UIView {
         pan.isEnabled = false // only while pointer mode is on
         addGestureRecognizer(pan)
         pointerPanRecognizer = pan
+
+        // The centre click as a TAP recognizer rather than via pressesBegan.
+        // On tvOS the select press is what a gesture recognizer on the same view
+        // competes for, and handling it in pressesBegan meant the click never
+        // arrived once the pan recognizer was active — reported as "the pointer
+        // moves but clicking does nothing". `allowedPressTypes` is the canonical
+        // way to catch it.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handlePointerTap))
+        tap.allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
+        tap.isEnabled = false
+        addGestureRecognizer(tap)
+        pointerTapRecognizer = tap
+    }
+
+    /// A tap is a press and release in quick succession — enough for clicking
+    /// buttons, which is what pointer mode is for. Dragging would need the
+    /// down/up split and isn't supported yet.
+    @objc private func handlePointerTap() {
+        inputHandler?.sendMouseButton(down: true, button: 0)
+        inputHandler?.sendMouseButton(down: false, button: 0)
     }
 
     @objc private func handlePointerPan(_ gesture: UIPanGestureRecognizer) {
@@ -139,10 +163,6 @@ final class VideoSurfaceView: UIView {
                 // itself handles closing (Resume / exit-command).
                 menuPressHandler?()
                 handled = true
-            } else if pointerModeActive && press.type == .select {
-                // Centre click = left mouse button while pointing.
-                inputHandler?.sendMouseButton(down: true, button: 0)
-                handled = true
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
                 inputHandler?.sendKeyEvent(
                     down: true,
@@ -159,10 +179,7 @@ final class VideoSurfaceView: UIView {
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
-            if pointerModeActive && press.type == .select {
-                inputHandler?.sendMouseButton(down: false, button: 0)
-                handled = true
-            } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
+            if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
                 inputHandler?.sendKeyEvent(
                     down: false,
                     vk: mapping.vk,

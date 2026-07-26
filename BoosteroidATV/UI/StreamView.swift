@@ -188,12 +188,25 @@ struct StreamView: View {
                 return CGPoint(x: geo.size.width / 2 + localCursor.x,
                                y: geo.size.height / 2 + localCursor.y)
             }()
-            Image(systemName: "cursorarrow")
-                .font(.system(size: 34, weight: .bold))
+            Image(systemName: "cursorarrow.fill")
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.9), radius: 3)
+                .shadow(color: .black.opacity(0.9), radius: 2)
                 .position(x: min(max(point.x, 0), geo.size.width),
                           y: min(max(point.y, 0), geo.size.height))
+
+            // Says whether the drawn arrow reflects the REAL remote cursor or
+            // only our own dead-reckoning. It matters: with dead-reckoning the
+            // arrow can sit somewhere the remote pointer isn't, so a click that
+            // "does nothing" may simply have landed elsewhere.
+            Text(controller.serverCursor == nil
+                 ? "pointer: estimated (server sends no position\(controller.cursorFields.isEmpty ? "" : "; fields: \(controller.cursorFields.joined(separator: ","))"))"
+                 : "pointer: server-tracked")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(6)
+                .background(.black.opacity(0.4), in: Capsule())
+                .position(x: geo.size.width / 2, y: geo.size.height - 40)
         }
         .allowsHitTesting(false)
     }
