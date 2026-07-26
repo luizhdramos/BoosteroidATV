@@ -190,6 +190,21 @@ actor BoosteroidClient {
             return live
         }
 
+        // Starting a DIFFERENT game: release whatever the account is holding
+        // first.
+        //
+        // Reported live: with one game's session open, launching another gave a
+        // session that reached "LI" but whose node then refused to negotiate
+        // (getIceServers failed). The account only backs one machine at a time,
+        // so the previous session has to be given up rather than left running
+        // alongside the new one.
+        //
+        // Best-effort by design: `dequeue` is CONFIRMED to answer 204 and to
+        // release a QUEUE slot. Whether it also tears down a fully LIVE session
+        // is NOT confirmed — if it doesn't, this is still no worse than before,
+        // and the next run will show it.
+        await dequeue(cookies: cookies)
+
         // Standalone-first (CONFIRMED 2026-07-23): the app must stream its OWN
         // fresh session so it is the SOLE WebRTC negotiator. It must NOT "take
         // over" a session another device is already streaming: opening our
@@ -235,6 +250,23 @@ actor BoosteroidClient {
             throw BoosteroidClientError.requestFailed("createSession/enqueue", String(data: data, encoding: .utf8) ?? "")
         }
         return try await fetchLastSession(cookies: cookies)
+    }
+
+    /// Gives up whatever session/queue slot the account is holding.
+    ///
+    /// CONFIRMED shape (web client's API map + a live call): POST
+    /// `/v2/streaming/session/dequeue`, NO body → 204. Two caveats, both
+    /// observed: it does NOT clear the stale `last-session` record (the same
+    /// "EN" entry was still reported afterwards, so never use that endpoint to
+    /// judge whether this worked), and whether it also ends a fully LIVE session
+    /// — as opposed to just a queue slot — has not been verified.
+    @discardableResult
+    func dequeue(cookies: [String: String]) async -> Bool {
+        let url = URL(string: "\(apiBase)/v2/streaming/session/dequeue")!
+        var req = authenticatedRequest(url, cookies: cookies, method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 204
     }
 
     /// Claims the machine once the queue clears — THE step that turns a queued
