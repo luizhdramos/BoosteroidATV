@@ -252,7 +252,17 @@ actor BoosteroidClient {
         guard (response as? HTTPURLResponse)?.statusCode == 204 else {
             throw BoosteroidClientError.requestFailed("createSession/enqueue", String(data: data, encoding: .utf8) ?? "")
         }
-        return try await fetchLastSession(cookies: cookies)
+        // Report what we actually just did — we enqueued, so this is queued.
+        //
+        // Returning `last-session` verbatim here was misleading: that record is
+        // stale, so right after enqueueing a SECOND game it still described the
+        // previous, live one and the UI showed "status LI" for a session that
+        // had only just joined a queue. Keep its id when it genuinely names this
+        // game (useful for polling), and otherwise wait for the real id, which
+        // arrives with the `queues/start` token.
+        let queued = try? await fetchLastSessionDTO(cookies: cookies)
+        let sessionId = (queued?.data.appId == Int(request.gameId)) ? (queued?.data.sessionId ?? "") : ""
+        return SessionInfo(sessionId: sessionId, nodeBaseUrl: nil, status: "EN")
     }
 
     /// Gives up whatever session/queue slot the account is holding.
@@ -475,7 +485,17 @@ actor BoosteroidClient {
         }
         // The VM may already be ready (no queue), in which case session/details
         // returns a gw straight away.
-        if let ready = try await detailsIfReady(sessionId: current.sessionId, cookies: cookies) {
+        //
+        // CRITICAL: only accept it when `last-session` actually names THIS game.
+        // That record is stale, and right after enqueueing a different game it
+        // still describes the PREVIOUS one — which, if it's live, answers 200
+        // with its own `gw`. Taking that at face value made the app skip the
+        // wait entirely and connect to the old game's machine, where the ICE
+        // fetch then failed. That's the reported "starts a second game and it
+        // goes straight to fetching ICE because the status is already LI".
+        if let dto = try? await fetchLastSessionDTO(cookies: cookies),
+           dto.data.appId == appId,
+           let ready = try await detailsIfReady(sessionId: dto.data.sessionId, cookies: cookies) {
             return ready
         }
         // Otherwise wait out the queue. CONFIRMED 2026-07-23: while queued,
