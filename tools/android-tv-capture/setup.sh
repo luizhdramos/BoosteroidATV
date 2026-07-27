@@ -187,7 +187,13 @@ fi
 
 # ---------------------------------------------------------------------------
 log "Booting the emulator"
-"$EMULATOR_BIN" -avd "$AVD_NAME" -no-snapshot-load -http-proxy "http://127.0.0.1:$MITM_PORT" >/tmp/boosteroid-emulator.log 2>&1 &
+# Deliberately NOT passing -http-proxy here. Google Sign-In actively detects
+# and refuses to work through an intercepting proxy (a real anti-MITM
+# measure, not a bug) — if the proxy is live from boot, signing into Google
+# Play just fails outright, before we ever get anywhere near Boosteroid. The
+# proxy gets turned on further down, only AFTER Play Store sign-in/install
+# is done, so it only ever sees Boosteroid's own traffic.
+"$EMULATOR_BIN" -avd "$AVD_NAME" -no-snapshot-load >/tmp/boosteroid-emulator.log 2>&1 &
 EMULATOR_PID=$!
 echo "  Emulator PID: $EMULATOR_PID (log: /tmp/boosteroid-emulator.log)"
 
@@ -209,11 +215,8 @@ CAPTURE_FILE="$CAPTURE_FILE" mitmweb \
   >/tmp/boosteroid-mitmweb.log 2>&1 &
 MITM_PID=$!
 echo "  mitmweb PID: $MITM_PID (log: /tmp/boosteroid-mitmweb.log)"
+echo "  (running, but the emulator isn't pointed at it yet — see below)"
 sleep 2
-
-# ---------------------------------------------------------------------------
-log "Pointing the emulator's system-wide proxy at mitmproxy"
-"$ADB" shell settings put global http_proxy "10.0.2.2:$MITM_PORT"
 
 # ---------------------------------------------------------------------------
 log "Fetching mitmproxy's CA certificate and pushing it to the device"
@@ -245,11 +248,16 @@ fi
 pause "On the emulator screen: open Settings > Security > Encryption & credentials > Install a certificate > CA certificate, then pick mitmproxy-ca.crt from Downloads and confirm the warning. This one tap is an Android security requirement I can't script around."
 
 # ---------------------------------------------------------------------------
-log "Opening the Play Store"
+log "Opening the Play Store (no proxy active yet — Google Sign-In needs a clean connection)"
 "$ADB" shell am start -a android.intent.action.VIEW -d "market://search?q=boosteroid" >/dev/null 2>&1 || \
   "$ADB" shell monkey -p com.android.vending -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 
-pause "Sign in with your Google account in the Play Store (I never see or touch this — do it directly on the emulator), then install 'Boosteroid Cloud Gaming TV'."
+pause "Sign in with your Google account in the Play Store (I never see or touch this — do it directly on the emulator), then install 'Boosteroid Cloud Gaming TV'. Do NOT open Boosteroid yet — the proxy isn't on until the next step."
+
+# ---------------------------------------------------------------------------
+log "Play Store sign-in/install is done — NOW turning the proxy on, so only Boosteroid's own traffic gets captured"
+"$ADB" shell settings put global http_proxy "10.0.2.2:$MITM_PORT"
+sleep 1
 
 # ---------------------------------------------------------------------------
 log "Launching Boosteroid"

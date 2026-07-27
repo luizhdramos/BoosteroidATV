@@ -15,6 +15,15 @@ The script does almost everything itself — installs Homebrew packages,
 downloads an Android TV emulator image with Play Store, boots it, starts
 mitmproxy, and wires the emulator to send its traffic through it.
 
+**Important:** the emulator boots with NO proxy active, and stays that way
+through Google sign-in. Google Sign-In actively detects and refuses to work
+through an intercepting proxy (a real anti-abuse measure, not a bug) — if
+the proxy were on from boot, logging into Google would just fail outright.
+The script only turns the proxy on AFTER Play Store sign-in/install is
+done, right before launching Boosteroid — so only Boosteroid's own traffic
+ever goes through mitmproxy. Don't open Boosteroid before that point, or its
+first-run requests won't be captured.
+
 It pauses at exactly three points, because these genuinely require a human
 (Android/Google intentionally don't allow scripting past them):
 
@@ -22,13 +31,13 @@ It pauses at exactly three points, because these genuinely require a human
    Settings. Without this, HTTPS traffic is unreadable ciphertext.
 2. **Signing into your Google account** in the Play Store, inside the
    emulator. Type it directly there — this is never something an AI
-   assistant should see or handle.
-3. **Installing "Boosteroid Cloud Gaming TV"** and navigating to its QR
-   login screen.
+   assistant should see or handle. The proxy is off for this step.
+3. **Installing "Boosteroid Cloud Gaming TV"** — also proxy-off. The script
+   turns the proxy on right after this pause, then launches the app itself.
 
 Everything else — creating the AVD, booting it, launching mitmproxy,
-pushing the certificate file, opening the Play Store, launching the app —
-is automated.
+pushing the certificate file, opening the Play Store, toggling the proxy
+at the right moment, launching the app — is automated.
 
 ## What you get
 
@@ -53,6 +62,14 @@ Once you have `boosteroid-capture.jsonl`, either:
 
 ## If something goes wrong
 
+- **Can't sign into Google / Play Store rejects the login**: this is almost
+  always the proxy being on too early — Google blocks sign-in through any
+  intercepting proxy on purpose. Check `adb shell settings get global
+  http_proxy`; if it prints anything other than `null`, turn it off with
+  `adb shell settings put global http_proxy :0`, then try signing in again.
+  Reinstalling the whole emulator (which some threads online suggest) isn't
+  actually the fix — it just resets the proxy setting back to off as a
+  side effect, which is the part that mattered.
 - **No Android TV + Play Store image was found for your Mac's chip**: the
   script automatically falls back to a phone-shaped Play Store image. The
   TV app may not show up in Play Store search on a phone profile — if so,
