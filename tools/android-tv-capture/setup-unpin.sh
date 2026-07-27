@@ -35,7 +35,6 @@ set -uo pipefail   # NOT -e: several steps here (root, frida-server) are
 
 CAPTURE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CAPTURE_FILE="$CAPTURE_DIR/boosteroid-capture.jsonl"
-APK_PATH="$CAPTURE_DIR/boosteroid.apk"
 UNPIN_AVD_BASE="BoosteroidTV-unpin"
 MITM_PORT=8080
 PACKAGE="com.boosteroidtv.streaming"
@@ -75,16 +74,47 @@ if [ "$N_DEVICES" -gt 1 ]; then
   "$ADB" devices
   die "Set ANDROID_SERIAL to pick the ORIGINAL one (the signed-in emulator with Boosteroid installed), e.g.: ANDROID_SERIAL=emulator-5554 bash setup-unpin.sh"
 fi
+# Captured so we can address this exact device below even after a second
+# emulator boots (adb refuses plain commands once >1 device is online).
+ORIGINAL_SERIAL="$("$ADB" devices | grep "device$" | awk '{print $1}')"
+echo "  Original emulator serial: $ORIGINAL_SERIAL"
 
-APK_REMOTE_PATH="$("$ADB" shell pm path "$PACKAGE" 2>/dev/null | tr -d '\r' | sed 's/^package://')"
-[ -n "$APK_REMOTE_PATH" ] || die "Boosteroid ($PACKAGE) isn't installed on the currently-connected device. Make sure it's the original emulator from setup.sh, with the app already installed."
-echo "  Found installed APK at: $APK_REMOTE_PATH"
+# Play Store commonly installs apps as a base APK plus split APKs (ABI,
+# language, density) — `pm path` returns one "package:/path" line per file,
+# not just one. All of them need to be pulled AND installed together via
+# `install-multiple`, or the single base.apk alone won't have the native
+# libraries / resources the app needs to run correctly.
+APK_DIR="$CAPTURE_DIR/boosteroid-apk-splits"
+mkdir -p "$APK_DIR"
+rm -f "$APK_DIR"/*.apk
 
-log "Pulling the APK to $APK_PATH"
-"$ADB" pull "$APK_REMOTE_PATH" "$APK_PATH" || die "adb pull failed."
+# NOT `mapfile` — macOS's system /bin/bash is 3.2 (GPLv2 license reasons),
+# and mapfile/readarray are bash-4+ builtins that don't exist there. A plain
+# while-read loop works on both.
+APK_REMOTE_PATHS=()
+while IFS= read -r line; do
+  [ -n "$line" ] && APK_REMOTE_PATHS+=("$line")
+done < <("$ADB" -s "$ORIGINAL_SERIAL" shell pm path "$PACKAGE" 2>/dev/null | tr -d '\r' | sed 's/^package://')
+[ "${#APK_REMOTE_PATHS[@]}" -gt 0 ] || die "Boosteroid ($PACKAGE) isn't installed on the currently-connected device. Make sure it's the original emulator from setup.sh, with the app already installed."
+echo "  Found ${#APK_REMOTE_PATHS[@]} APK file(s):"
+printf '    %s\n' "${APK_REMOTE_PATHS[@]}"
 
-SOURCE_ABI="$("$ADB" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r')"
+log "Pulling all APK file(s) to $APK_DIR"
+LOCAL_APKS=()
+for remote in "${APK_REMOTE_PATHS[@]}"; do
+  fname="$(basename "$remote")"
+  "$ADB" -s "$ORIGINAL_SERIAL" pull "$remote" "$APK_DIR/$fname" || die "adb pull failed for $remote"
+  LOCAL_APKS+=("$APK_DIR/$fname")
+done
+
+SOURCE_ABI="$("$ADB" -s "$ORIGINAL_SERIAL" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r')"
 echo "  Source device ABI: $SOURCE_ABI"
+
+log "Freeing up adb (killing the original emulator — everything needed from it is pulled)"
+# From here on only the new rooted AVD should be connected, so plain `adb`
+# commands (no -s needed) stay unambiguous for the rest of the script.
+"$ADB" -s "$ORIGINAL_SERIAL" emu kill || true
+sleep 3
 
 # ---------------------------------------------------------------------------
 log "Finding a rootable (non-Play-Store) 'google_apis' system image, same ABI"
@@ -129,8 +159,8 @@ log "Getting root"
 sleep 2
 "$ADB" wait-for-device
 
-log "Installing the pulled Boosteroid APK"
-"$ADB" install -r "$APK_PATH" || die "adb install failed — the APK pulled from the source device may be split/multi-APK (Play Store sometimes installs as an app bundle, which a single 'pm path' + pull won't fully capture). If so, tell Claude — we'll need 'adb shell pm path --all-splits' instead."
+log "Installing the pulled Boosteroid APK(s)"
+"$ADB" install-multiple -r "${LOCAL_APKS[@]}" || die "adb install-multiple failed. Files pulled: ${LOCAL_APKS[*]}"
 
 # ---------------------------------------------------------------------------
 log "Installing frida-tools + objection on this machine (if needed)"
