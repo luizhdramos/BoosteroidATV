@@ -115,7 +115,13 @@ final class VideoSurfaceView: UIView {
     @objc private func handlePointerTap() {
         inputHandler?.sendMouseButton(down: true, button: 0)
         inputHandler?.sendMouseButton(down: false, button: 0)
+        pointerClickedHandler?()
     }
+
+    /// Fired on every click actually recognised, so the UI can show whether the
+    /// tap is even reaching us. Without this, "clicking does nothing" can't be
+    /// told apart from the gesture never firing.
+    var pointerClickedHandler: (() -> Void)?
 
     @objc private func handlePointerPan(_ gesture: UIPanGestureRecognizer) {
         switch gesture.state {
@@ -402,12 +408,15 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
     var pointerMode: Bool = false
     /// Each relative mouse delta sent, mirrored so the UI can draw a pointer.
     var onPointerMoved: (CGFloat, CGFloat) -> Void = { _, _ in }
+    /// Fired per recognised click, so the UI can prove the tap is arriving.
+    var onPointerClicked: () -> Void = {}
 
     func makeUIViewController(context: Context) -> StreamingViewController {
         let vc = StreamingViewController()
         vc.videoSurface.menuPressHandler = onMenu
         vc.videoSurface.pointerModeActive = pointerMode
         vc.videoSurface.pointerMovedHandler = onPointerMoved
+        vc.videoSurface.pointerClickedHandler = onPointerClicked
         Task { @MainActor in
             streamController.bindVideoView(vc.videoSurface)
         }
@@ -419,6 +428,7 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
         vc.videoSurface.menuPressHandler = onMenu
         vc.videoSurface.pointerModeActive = pointerMode
         vc.videoSurface.pointerMovedHandler = onPointerMoved
+        vc.videoSurface.pointerClickedHandler = onPointerClicked
         vc.controllerUserInteractionEnabled = showOverlay
         vc.videoSurface.overlayVisible = showOverlay
     }

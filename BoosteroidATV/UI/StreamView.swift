@@ -24,6 +24,9 @@ struct StreamView: View {
     /// Dead-reckoned pointer offset from centre, used only while the server
     /// reports no cursor position of its own.
     @State private var localCursor: CGPoint = .zero
+    /// Clicks the tap recognizer actually saw — proves whether the press is
+    /// reaching us at all, separately from the server acting on it.
+    @State private var pointerClicks = 0
     @State private var showKeyboard = false
     @State private var errorMessage: String?
     @State private var queueAttempt = 0
@@ -124,7 +127,8 @@ struct StreamView: View {
                     onPointerMoved: { dx, dy in
                         localCursor.x += dx
                         localCursor.y += dy
-                    }
+                    },
+                    onPointerClicked: { pointerClicks += 1 }
                 )
                 .ignoresSafeArea()
                 // Compact performance overlay — only when enabled in Settings.
@@ -204,9 +208,10 @@ struct StreamView: View {
             // only our own dead-reckoning. It matters: with dead-reckoning the
             // arrow can sit somewhere the remote pointer isn't, so a click that
             // "does nothing" may simply have landed elsewhere.
-            Text(controller.serverCursor == nil
-                 ? "pointer: estimated (server sends no position\(controller.cursorFields.isEmpty ? "" : "; fields: \(controller.cursorFields.joined(separator: ","))"))"
-                 : "pointer: server-tracked")
+            Text((controller.serverCursor == nil
+                  ? "pointer: estimated (server sends no position\(controller.cursorFields.isEmpty ? "" : "; fields: \(controller.cursorFields.joined(separator: ","))"))"
+                  : "pointer: server-tracked")
+                 + " · clicks sent: \(pointerClicks)")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(6)
