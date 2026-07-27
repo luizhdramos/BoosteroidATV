@@ -148,8 +148,36 @@ actor BoosteroidAuthAPI {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpShouldHandleCookies = false
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // REAL FIRST ATTEMPT (2026-07-28) with only Content-Type/Accept set
+        // failed: "something wrong with your data" — a generic-sounding
+        // rejection, not a credentials error. The shared `session` above sets
+        // a DESKTOP BROWSER User-Agent (needed elsewhere for cookie/Cloudflare
+        // compatibility), which this endpoint's backend likely branches on to
+        // decide whether to require a Turnstile token — a browser UA hitting
+        // this Turnstile-free native-app route may simply get refused. These
+        // headers override that per-request with the exact values captured
+        // from the real Android TV app (see tools/android-tv-capture/), so
+        // this call presents as that same recognized client. `device-info`
+        // and `device-name` describe the ANDROID EMULATOR the capture ran on
+        // (not a real tvOS device) — using them verbatim maximizes the odds
+        // of matching a known-accepted signature; TODO(protocol): swap in
+        // real Apple TV device info once it's confirmed these fields aren't
+        // validated/pinned to a specific value. `x-nonce-17`'s derivation is
+        // still unknown (could be a harmless counter, could be a signed
+        // anti-tampering nonce) — left out for now; if "something wrong with
+        // your data" persists even with the headers below, this is the next
+        // thing to investigate.
+        request.setValue("BoosteroidAndroidTVClient v.2.5.10.tv; Android 14; sdk_gphone64_arm64", forHTTPHeaderField: "User-Agent")
+        request.setValue("emu64a sdk_gphone64_arm64 34", forHTTPHeaderField: "device-name")
+        request.setValue("", forHTTPHeaderField: "device-uniq-id")
+        request.setValue("en-US", forHTTPHeaderField: "accept-language")
+        request.setValue(
+            #"{"brand":"google","chip":" ","device":"emu64a","hardware":"ranchu","manufacturer":"Google","model":"sdk_gphone64_arm64","name":"UE1A.230829.050","product":"sdk_gphone64_arm64"}"#,
+            forHTTPHeaderField: "device-info"
+        )
+        request.setValue("boosteroid_entrypoint_source=1;boosteroid_entrypoint_page=1", forHTTPHeaderField: "Cookie")
         let body: [String: Any] = [
             "client_id": BoosteroidAuth.clientId,
             "client_secret": BoosteroidAuth.clientSecret,
