@@ -220,6 +220,7 @@ struct StreamView: View {
                 .background(.black.opacity(0.4), in: Capsule())
                 .position(x: geo.size.width / 2, y: geo.size.height - 40)
         }
+        .ignoresSafeArea()
         .allowsHitTesting(false)
     }
 
