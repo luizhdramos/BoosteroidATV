@@ -48,3 +48,5 @@ CLAUDE.md
 # contains real captured session data, never commit these.
 tools/android-tv-capture/mitmproxy-ca.pem
 tools/android-tv-capture/boosteroid-capture.jsonl
+tools/android-tv-capture/all-hosts.log
+tools/android-tv-capture/__pycache__/
