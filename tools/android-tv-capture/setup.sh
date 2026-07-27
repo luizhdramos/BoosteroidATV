@@ -219,7 +219,28 @@ log "Pointing the emulator's system-wide proxy at mitmproxy"
 log "Fetching mitmproxy's CA certificate and pushing it to the device"
 curl -fsSL http://127.0.0.1:8081 >/dev/null 2>&1 || true   # nudge mitmweb to be ready
 curl -fsSL "http://mitm.it/cert/pem" -o "$CERT_PEM" 2>/dev/null || cp "$HOME/.mitmproxy/mitmproxy-ca-cert.pem" "$CERT_PEM"
-"$ADB" push "$CERT_PEM" /sdcard/Download/mitmproxy-ca.crt
+
+# /sdcard's FUSE layer can still be mounting for a few seconds right after
+# "sys.boot_completed=1" — a push attempted too early fails with "remote
+# couldn't create file: Operation not permitted" even though nothing is
+# actually wrong. Retry instead of treating the first failure as fatal.
+PUSHED=false
+for attempt in $(seq 1 15); do
+  if "$ADB" push "$CERT_PEM" /sdcard/Download/mitmproxy-ca.crt 2>/tmp/boosteroid-push.log; then
+    PUSHED=true
+    break
+  fi
+  echo "  /sdcard not ready yet (attempt $attempt/15) — retrying in 2s..."
+  sleep 2
+done
+
+if [ "$PUSHED" = false ]; then
+  echo "  Still failing after retries — falling back via /data/local/tmp (always writable over adb)."
+  "$ADB" push "$CERT_PEM" /data/local/tmp/mitmproxy-ca.crt
+  "$ADB" shell mkdir -p /sdcard/Download
+  "$ADB" shell cp /data/local/tmp/mitmproxy-ca.crt /sdcard/Download/mitmproxy-ca.crt || \
+    die "Couldn't get the certificate onto the device at all. Last error: $(cat /tmp/boosteroid-push.log 2>/dev/null)"
+fi
 
 pause "On the emulator screen: open Settings > Security > Encryption & credentials > Install a certificate > CA certificate, then pick mitmproxy-ca.crt from Downloads and confirm the warning. This one tap is an Android security requirement I can't script around."
 
