@@ -8,16 +8,6 @@ import GameController
 protocol InputEventHandler: AnyObject {
     func sendKeyEvent(down: Bool, vk: UInt16, scancode: UInt16, modifiers: UInt16)
     func sendMouseMove(dx: Int16, dy: Int16)
-    /// Absolute pointer position, in the streamed surface's own pixels.
-    ///
-    /// UNVERIFIED, and deliberately used only by pointer mode. Relative movement
-    /// (`sendMouseMove`) is confirmed and works when the game has the pointer
-    /// captured, but on a desktop/launcher screen the server ignored both our
-    /// moves and our clicks — the web client has an absolute/locked cursor mode
-    /// (its cursor-mode-manager.js) that was never ported. The confirmed move
-    /// message already carries `syncLocalPosition` and surface dimensions, which
-    /// is what this builds on; the absolute field names are the guess.
-    func sendMouseAbsolute(x: Int, y: Int)
     func sendMouseButton(down: Bool, button: UInt8)
     func sendMouseWheel(delta: Int16)
 }
@@ -163,21 +153,6 @@ final class InputSender: InputEventHandler {
             "movementX": Int(dx), "movementY": Int(dy),
             "surfaceWidth": width, "surfaceHeight": height,
             "syncLocalPosition": false, "movementIsAdjusted": true,
-        ]) }
-    }
-
-    /// Absolute positioning attempt — see the protocol declaration for why this
-    /// exists and what in it is confirmed versus guessed. Keeps the confirmed
-    /// envelope (surface dimensions, syncLocalPosition) and adds x/y, flipping
-    /// `syncLocalPosition` to true since that flag's whole purpose appears to be
-    /// telling the server where the client thinks the pointer is.
-    func sendMouseAbsolute(x: Int, y: Int) {
-        let width = surfaceWidth, height = surfaceHeight
-        Task { [controlChannel] in await controlChannel.send(type: "mouse", fields: [
-            "x": x, "y": y,
-            "movementX": 0, "movementY": 0,
-            "surfaceWidth": width, "surfaceHeight": height,
-            "syncLocalPosition": true, "movementIsAdjusted": false,
         ]) }
     }
 

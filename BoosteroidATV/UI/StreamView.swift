@@ -21,8 +21,8 @@ struct StreamView: View {
     @State private var showOverlay = false
     /// Siri Remote touch surface acts as a mouse (see VideoSurfaceView).
     @State private var pointerMode = false
-    /// Dead-reckoned pointer offset from centre, used only while the server
-    /// reports no cursor position of its own.
+    /// Tracked pointer position in REMOTE-desktop pixels. Kept in step with the
+    /// real cursor because pointer mode pins it to (0,0) when switched on.
     @State private var localCursor: CGPoint = .zero
     /// Clicks the tap recognizer actually saw — proves whether the press is
     /// reaching us at all, separately from the server acting on it.
@@ -124,10 +124,7 @@ struct StreamView: View {
                     showOverlay: showOverlay || showKeyboard,
                     onMenu: { showOverlay.toggle() },
                     pointerMode: pointerMode,
-                    onPointerMoved: { dx, dy in
-                        localCursor.x += dx
-                        localCursor.y += dy
-                    },
+                    onPointerPosition: { localCursor = $0 },
                     onPointerClicked: { pointerClicks += 1 },
                     // Absolute coordinates must be in the REMOTE desktop's
                     // pixels, so use the live decoded size when it's known and
@@ -191,14 +188,12 @@ struct StreamView: View {
                 width: max(1, CGFloat(controller.stats.resolutionWidth)),
                 height: max(1, CGFloat(controller.stats.resolutionHeight))
             )
-            let point: CGPoint = {
-                if let server = controller.serverCursor, controller.stats.resolutionWidth > 0 {
-                    return CGPoint(x: server.x / remote.width * geo.size.width,
-                                   y: server.y / remote.height * geo.size.height)
-                }
-                return CGPoint(x: geo.size.width / 2 + localCursor.x,
-                               y: geo.size.height / 2 + localCursor.y)
-            }()
+            // Both sources are in remote-desktop pixels now: the server's when it
+            // reports one, otherwise our own tracking, which is trustworthy
+            // because pointer mode pins the cursor to (0,0) on activation.
+            let source = controller.serverCursor ?? localCursor
+            let point = CGPoint(x: source.x / remote.width * geo.size.width,
+                                y: source.y / remote.height * geo.size.height)
             // Drawn as a shape rather than an SF Symbol: "cursorarrow.fill"
             // isn't available on tvOS, and Image(systemName:) renders NOTHING
             // for an unknown name — which is why the pointer vanished entirely.
