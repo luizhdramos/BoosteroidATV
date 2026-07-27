@@ -29,8 +29,21 @@ protocol InputEventHandler: AnyObject {
 @MainActor
 final class InputSender: InputEventHandler {
     private let controlChannel: BoosteroidControlChannel
-    private let surfaceWidth: Int
-    private let surfaceHeight: Int
+    /// The surface size used to turn absolute pointer pixels into the
+    /// fraction (0.0-1.0) the server expects (see sendMouseAbsolute). Starts
+    /// at the REQUESTED resolution (StreamSettings), but that's only a guess
+    /// until the first decoded frame reports the ACTUAL negotiated size —
+    /// updateSurfaceSize(width:height:) keeps this in step with that, and
+    /// with the same live value StreamView/VideoSurfaceView use for drawing
+    /// and clamping (controller.stats.resolutionWidth/Height). Letting these
+    /// drift apart (frozen requested size here vs. live actual size there)
+    /// silently scales every absolute click: the drawn arrow tracks correctly
+    /// but the coordinate actually sent lands somewhere else — confirmed
+    /// 2026-07-27 as the cause of "arrow is right, click still does nothing"
+    /// once the visual safe-area bug was fixed and the mismatch was no longer
+    /// masked by it.
+    private var surfaceWidth: Int
+    private var surfaceHeight: Int
 
     private var controllerPollTask: Task<Void, Never>?
     private var connectObserver: NSObjectProtocol?
@@ -80,6 +93,15 @@ final class InputSender: InputEventHandler {
         self.controlChannel = controlChannel
         self.surfaceWidth = surfaceWidth
         self.surfaceHeight = surfaceHeight
+    }
+
+    /// Called by StreamController's stats loop once the decoded frame size is
+    /// known, so absolute-pointer fractions are computed against the REAL
+    /// negotiated resolution rather than whatever was merely requested.
+    func updateSurfaceSize(width: Int, height: Int) {
+        guard width > 0, height > 0 else { return }
+        surfaceWidth = width
+        surfaceHeight = height
     }
 
     func start() {

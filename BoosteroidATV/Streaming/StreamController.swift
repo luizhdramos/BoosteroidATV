@@ -455,6 +455,12 @@ final class StreamController: NSObject {
                 self.stats.fps = fps
                 self.stats.resolutionWidth = w
                 self.stats.resolutionHeight = h
+                // Keep the absolute-pointer math in step with the ACTUAL
+                // decoded resolution — it can differ from what was merely
+                // requested in Settings, and InputSender was otherwise frozen
+                // on the requested value for the whole session (see
+                // updateSurfaceSize's doc comment).
+                self.inputSender?.updateSurfaceSize(width: w, height: h)
                 self.framesDecoded = frames
                 self.framesReceived = framesRx
                 self.keyFramesDecoded = keyFrames
