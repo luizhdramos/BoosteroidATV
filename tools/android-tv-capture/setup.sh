@@ -120,7 +120,13 @@ if ! "$SDKMANAGER" $SDK_ROOT_FLAG --version; then
 fi
 
 log "Accepting SDK licenses (non-interactive)"
-yes | "$SDKMANAGER" $SDK_ROOT_FLAG --licenses
+# `yes` gets SIGPIPE'd (nonzero exit) the instant sdkmanager stops reading
+# stdin, which — combined with `set -o pipefail` above — silently killed the
+# whole script right here with no error message. `|| true` swallows that
+# expected, harmless pipe failure; sdkmanager's own exit status still isn't
+# checked here, which is fine since a real license failure surfaces later
+# when the actual --install call fails instead.
+yes | "$SDKMANAGER" $SDK_ROOT_FLAG --licenses || true
 
 # ---------------------------------------------------------------------------
 log "Finding the best Android TV + Play Store system image"
@@ -159,7 +165,12 @@ fi
 echo "  Using: $IMAGE"
 
 log "Installing that system image (this downloads a few GB — grab a coffee)"
-yes | "$SDKMANAGER" $SDK_ROOT_FLAG --install "$IMAGE" "platform-tools" "emulator"
+# Same `yes | ...` pipe-vs-pipefail gotcha as the licenses step above — `yes`
+# exits nonzero on SIGPIPE once sdkmanager stops reading, which would abort
+# the script right here with no message. The actual install result is
+# checked explicitly below instead of trusting this line's exit status.
+yes | "$SDKMANAGER" $SDK_ROOT_FLAG --install "$IMAGE" "platform-tools" "emulator" || true
+[ -x "$ANDROID_SDK_ROOT/emulator/emulator" ] || die "Emulator binary missing after --install — check the output above for a real error (disk space, network, etc.)."
 
 ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
 EMULATOR_BIN="$ANDROID_SDK_ROOT/emulator/emulator"
