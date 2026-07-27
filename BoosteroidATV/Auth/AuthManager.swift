@@ -6,11 +6,20 @@ import Observation
 
 enum LoginPhase: Equatable {
     case idle
-    /// tvOS has no WebKit at all (confirmed — the framework isn't shipped on
-    /// this platform, so there's no in-app browser to render Boosteroid's
-    /// Cloudflare-Turnstile-gated login page). The user instead logs in on a
-    /// real browser on another device and pastes the resulting `Cookie`
-    /// request header back into the app — see LoginView's manual entry screen.
+    /// CONFIRMED 2026-07-27 (captured the real Android TV app's traffic): a
+    /// direct, Turnstile-free email/password form — exactly what that app's
+    /// own "Sign in Manually" button does (POST /api/v1/auth/login). This is
+    /// now the PRIMARY login path — no external browser needed at all. See
+    /// BoosteroidAuthAPI.login(email:password:).
+    case credentialsEntry
+    /// Fallback, kept for cases the direct login can't handle (e.g. an
+    /// account that only has Google/Steam social sign-in and no password
+    /// set). tvOS has no WebKit at all (confirmed — the framework isn't
+    /// shipped on this platform, so there's no in-app browser to render
+    /// Boosteroid's Cloudflare-Turnstile-gated login page). The user instead
+    /// logs in on a real browser on another device and pastes the resulting
+    /// `Cookie` request header back into the app — see LoginView's manual
+    /// entry screen.
     case manualCookieEntry
     case exchangingTokens
     case failed(String)
@@ -48,6 +57,13 @@ final class AuthManager {
     func login() {
         loginTask?.cancel()
         loginTask = nil
+        loginPhase = .credentialsEntry
+    }
+
+    /// Switches to the fallback cookie-paste flow (see LoginPhase.manualCookieEntry).
+    func useManualCookieEntry() {
+        loginTask?.cancel()
+        loginTask = nil
         loginPhase = .manualCookieEntry
     }
 
@@ -55,6 +71,26 @@ final class AuthManager {
         loginTask?.cancel()
         loginTask = nil
         loginPhase = .idle
+    }
+
+    /// Called by LoginView's email/password form — the primary login path.
+    /// See BoosteroidAuthAPI.login(email:password:) for the confirmed
+    /// protocol (captured from the real Android TV app).
+    func submitCredentials(email: String, password: String) {
+        loginTask?.cancel()
+        loginTask = Task {
+            loginPhase = .exchangingTokens
+            do {
+                let newSession = try await api.login(email: email, password: password)
+                session = newSession
+                scheduleProactiveRefresh()
+                scheduleBackgroundRefresh()
+                try persist(newSession)
+                loginPhase = .idle
+            } catch {
+                loginPhase = .failed(error.localizedDescription)
+            }
+        }
     }
 
     /// Called by LoginView's manual entry screen with whatever the user typed

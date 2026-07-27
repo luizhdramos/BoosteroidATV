@@ -20,6 +20,19 @@ nonisolated enum BoosteroidAuth {
     /// (e.g. "sp0.cloud.boosteroid.com" — see SessionInfo.nodeBaseUrl).
     static let apiBaseUrl = "https://cloud.boosteroid.com"
 
+    /// CONFIRMED 2026-07-27 by capturing the official Android TV client's own
+    /// traffic (Frida SSL-pinning bypass + mitmproxy — see
+    /// tools/android-tv-capture/). This is that app's own embedded
+    /// OAuth-style client id/secret pair, identical across every install
+    /// (client_id 6) — it is not a per-user secret. Boosteroid's own
+    /// "Sign in Manually" screen uses exactly this pair against
+    /// POST /api/v1/auth/login, a plain JSON REST endpoint with no
+    /// Cloudflare Turnstile challenge (Turnstile only gates the
+    /// browser-facing /auth/login page, not this API route) — see
+    /// BoosteroidAuthAPI.login(email:password:).
+    static let clientId = 6
+    static let clientSecret = "CDYb8AnfFEeU3p4Rd1A3oGonxMJMe3TdWJwDWSsy"
+
     // NOTE: Cloudflare's `cf_clearance` cookie (and possibly Boosteroid's own
     // session check) is tied to the User-Agent that was active when the
     // cookies were issued. This must match whatever browser you actually used

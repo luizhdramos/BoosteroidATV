@@ -3,6 +3,8 @@ import SwiftUI
 struct LoginView: View {
     @Environment(AuthManager.self) var authManager
     @State private var cookieInput: String = ""
+    @State private var email: String = ""
+    @State private var password: String = ""
 
     var body: some View {
         ZStack {
@@ -10,6 +12,8 @@ struct LoginView: View {
             switch authManager.loginPhase {
             case .idle:
                 loginPrompt
+            case .credentialsEntry:
+                credentialsEntry
             case .manualCookieEntry:
                 manualCookieEntry
             case .exchangingTokens:
@@ -18,6 +22,55 @@ struct LoginView: View {
                 failedView(message: message)
             }
         }
+    }
+
+    // MARK: Credentials Entry
+    //
+    // CONFIRMED 2026-07-27 by capturing the real Android TV app's traffic
+    // (see tools/android-tv-capture/): a direct email/password login, no
+    // Cloudflare Turnstile challenge involved (that only gates the
+    // browser-facing /auth/login page, not this REST endpoint) — exactly
+    // what that app's own "Sign in Manually" screen does. This replaces the
+    // external-browser-plus-cookie-paste flow as the primary path.
+    private var credentialsEntry: some View {
+        VStack(spacing: 32) {
+            VStack(spacing: 8) {
+                Text("Sign in to Boosteroid")
+                    .font(.title.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text("Same account as the mobile/web app.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 16) {
+                TextField("Email", text: $email)
+                    .textContentType(.username)
+                SecureField("Password", text: $password)
+                    .textContentType(.password)
+            }
+            .frame(maxWidth: 700)
+
+            HStack(spacing: 24) {
+                Button("Sign In") {
+                    authManager.submitCredentials(email: email, password: password)
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+                .disabled(email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
+                Button("Cancel") { authManager.cancelLogin() }
+                    .buttonStyle(.bordered)
+                    .tint(.gray)
+            }
+
+            Button("Trouble signing in? Use cookie method instead") {
+                authManager.useManualCookieEntry()
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(80)
     }
 
     // MARK: Login Prompt
@@ -194,6 +247,13 @@ struct LoginView: View {
                     .buttonStyle(.bordered)
                     .tint(.gray)
             }
+
+            Button("Use cookie method instead") {
+                authManager.useManualCookieEntry()
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .padding(80)
     }

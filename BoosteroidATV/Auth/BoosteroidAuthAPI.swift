@@ -130,6 +130,95 @@ actor BoosteroidAuthAPI {
         cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; ")
     }
 
+    /// CONFIRMED 2026-07-27 by capturing the real Android TV app's traffic
+    /// (Frida SSL-pinning bypass + mitmproxy — see tools/android-tv-capture/):
+    /// a direct, Turnstile-free email/password login — exactly what that
+    /// app's own "Sign in Manually" button does. Response body:
+    /// {"data":{"user":{id,name,email,avatar,...},"access_token":"Bearer ...",
+    /// "refresh_token":"...","expires_in":"yyyy-MM-dd HH:mm:ss",...}}, PLUS
+    /// Set-Cookie headers for access_token/refresh_token/boosteroid_auth/
+    /// boosteroid_session — the SAME cookies `completeLogin(cookies:)` above
+    /// already expects from a manually-pasted export. So this is a strictly
+    /// better way to obtain those cookies; BoosteroidClient's existing
+    /// cookie-based REST calls need no changes at all.
+    func login(email: String, password: String) async throws -> AuthSession {
+        guard let url = URL(string: BoosteroidAuth.apiBaseUrl + "/api/v1/auth/login") else {
+            throw AuthError.loginFailed("Invalid login endpoint URL.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let body: [String: Any] = [
+            "client_id": BoosteroidAuth.clientId,
+            "client_secret": BoosteroidAuth.clientSecret,
+            "email": email,
+            "password": password,
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw AuthError.loginFailed("Couldn't reach Boosteroid: \(error.localizedDescription)")
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw AuthError.loginFailed("No HTTP response.")
+        }
+        guard http.statusCode == 200 else {
+            // CONFIRMED error shape on this same API for an unauthenticated
+            // call (the qr-code/sync polling endpoint): {"error":
+            // {"message":"..."},"error_message":"...",...}. Wrong credentials
+            // specifically on THIS endpoint weren't captured, so fall back to
+            // a raw body preview if that shape doesn't match (e.g. a Laravel
+            // validation-error body instead).
+            let message = (try? JSONDecoder().decode(BoosteroidErrorDTO.self, from: data))?.error.message
+                ?? String(data: data.prefix(300), encoding: .utf8)
+                ?? "HTTP \(http.statusCode)"
+            throw AuthError.loginFailed(message)
+        }
+        guard let dto = try? JSONDecoder().decode(BoosteroidLoginResponseDTO.self, from: data) else {
+            let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "<non-UTF8 body>"
+            throw AuthError.loginFailed("Unexpected response shape from /api/v1/auth/login: \(bodyPreview)")
+        }
+
+        var cookies: [String: String] = [:]
+        if let headerFields = http.allHeaderFields as? [String: String] {
+            for cookie in HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: url) {
+                cookies[cookie.name] = cookie.value
+            }
+        }
+
+        let user = AuthUser(
+            userId: String(dto.data.user.id),
+            displayName: dto.data.user.name,
+            email: dto.data.user.email,
+            avatarUrl: dto.data.user.avatar,
+            membershipTier: "unknown"
+        )
+        let tokens = AuthTokens(
+            accessToken: dto.data.accessToken,
+            refreshToken: dto.data.refreshToken,
+            sessionCookies: cookies.isEmpty ? nil : cookies,
+            expiresAt: Self.parseExpiresIn(dto.data.expiresIn) ?? Date().addingTimeInterval(12 * 60 * 60)
+        )
+        return AuthSession(tokens: tokens, user: user)
+    }
+
+    /// `expires_in` is misleadingly named — CONFIRMED (live capture) it's an
+    /// absolute "yyyy-MM-dd HH:mm:ss" timestamp (UTC, matching the response's
+    /// own `Date` header), not a duration in seconds.
+    private static func parseExpiresIn(_ raw: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.date(from: raw)
+    }
+
     /// Fetches a plain-text/JSON body from an arbitrary URL — used when the
     /// user pastes a link to a cookie export (iCloud Drive share, Gist raw
     /// URL, etc.) instead of the cookie text itself, since Apple TV's remote
@@ -172,4 +261,32 @@ actor BoosteroidAuthAPI {
     func refresh(_ session: AuthSession) async throws -> AuthSession {
         throw AuthError.tokenRefreshFailed("No refresh mechanism known yet for Boosteroid — re-login required.")
     }
+}
+
+/// CONFIRMED 2026-07-27 response shape for POST /api/v1/auth/login (captured
+/// from the real Android TV app). Reuses BoosteroidUserResponseDTO.Payload's
+/// shape for the nested user object (SessionState.swift) since it's the same
+/// {id,name,email,avatar} fields as GET /api/v1/user.
+private struct BoosteroidLoginResponseDTO: Decodable {
+    struct DataDTO: Decodable {
+        let user: BoosteroidUserResponseDTO.Payload
+        let accessToken: String
+        let refreshToken: String
+        let expiresIn: String
+
+        enum CodingKeys: String, CodingKey {
+            case user
+            case accessToken = "access_token"
+            case refreshToken = "refresh_token"
+            case expiresIn = "expires_in"
+        }
+    }
+    let data: DataDTO
+}
+
+/// CONFIRMED shape for at least the qr-code/sync "Unauthenticated" case on
+/// this same API — used here as a best-effort parse for login errors too.
+private struct BoosteroidErrorDTO: Decodable {
+    struct ErrorDTO: Decodable { let message: String }
+    let error: ErrorDTO
 }
