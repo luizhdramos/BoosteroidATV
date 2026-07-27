@@ -83,23 +83,20 @@ final class StreamController: NSObject {
     /// nil until (or unless) the server sends one — see the `.cursor` note in
     /// BoosteroidControlChannel.
     private(set) var serverCursor: CGPoint?
-    /// Field names of the last cursor message, so an unrecognised shape can be
-    /// identified from a real session instead of guessed at.
-    private(set) var cursorFields: [String] = []
     /// Whether BoosteroidControlChannel is still open. ALL input (mouse,
     /// keyboard, controller) rides this one socket, entirely separate from
     /// the WebRTC media connection — so if it silently drops mid-session, the
     /// video keeps playing perfectly fine while every input send just no-ops
     /// (BoosteroidControlChannel.send() guards on `isOpen` and swallows the
     /// error with `try?`). Worse, every on-screen "input sent" signal in this
-    /// app (the pointer arrow's position, the "clicks sent" counter, the
-    /// controller poll loop) is updated OPTIMISTICALLY from local state the
-    /// instant we attempt to send, never from a server acknowledgement — so
-    /// none of them can tell "sent" apart from "silently dropped". This flag
-    /// is the one honest signal: it only goes false on a real `.closed`/
-    /// `.failed` event from the socket itself. Surfaced in the stats overlay
-    /// and pointer caption so "clicking does nothing" can be told apart from
-    /// "the input channel died" without guessing.
+    /// app (the pointer arrow's position, the controller poll loop) is
+    /// updated OPTIMISTICALLY from local state the instant we attempt to
+    /// send, never from a server acknowledgement — so none of them can tell
+    /// "sent" apart from "silently dropped". This flag is the one honest
+    /// signal: it only goes false on a real `.closed`/`.failed` event from
+    /// the socket itself. Surfaced in the stats overlay so "input does
+    /// nothing" can be told apart from "the input channel died" without
+    /// guessing.
     private(set) var controlChannelAlive = true
 
     private var peerConnection: LKRTCPeerConnection?
@@ -232,8 +229,7 @@ final class StreamController: NSObject {
                     if !self.didStartWebRTC { await self.startWebRTCMedia(client: client) }
                 case .raw(let type, let action):
                     self.controlLog.append("\(type ?? "?")/\(action ?? "?")")
-                case .cursor(let x, let y, _, let fields):
-                    self.cursorFields = fields
+                case .cursor(let x, let y, _, _):
                     if let x, let y { self.serverCursor = CGPoint(x: x, y: y) }
                 case .controllerAck(let name, _):
                     self.controlLog.append("controller connected: \(name)")

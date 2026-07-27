@@ -24,9 +24,6 @@ struct StreamView: View {
     /// Tracked pointer position in REMOTE-desktop pixels. Kept in step with the
     /// real cursor because pointer mode pins it to (0,0) when switched on.
     @State private var localCursor: CGPoint = .zero
-    /// Clicks the tap recognizer actually saw — proves whether the press is
-    /// reaching us at all, separately from the server acting on it.
-    @State private var pointerClicks = 0
     @State private var showKeyboard = false
     @State private var errorMessage: String?
     @State private var queueAttempt = 0
@@ -131,8 +128,7 @@ struct StreamView: View {
                     surfaceSize: controller.stats.resolutionWidth > 0
                         ? CGSize(width: controller.stats.resolutionWidth,
                                  height: controller.stats.resolutionHeight)
-                        : StreamView.parseResolution(settings.resolution),
-                    onPointerClicked: { pointerClicks += 1 }
+                        : StreamView.parseResolution(settings.resolution)
                 )
                 .ignoresSafeArea()
                 // Compact performance overlay — only when enabled in Settings.
@@ -205,26 +201,6 @@ struct StreamView: View {
                 // The tip is the click point, so offset the shape's centre.
                 .position(x: min(max(point.x, 0), geo.size.width) + 8,
                           y: min(max(point.y, 0), geo.size.height) + 12)
-
-            // Says whether the drawn arrow reflects the REAL remote cursor or
-            // only our own dead-reckoning. It matters: with dead-reckoning the
-            // arrow can sit somewhere the remote pointer isn't, so a click that
-            // "does nothing" may simply have landed elsewhere.
-            Text((controller.serverCursor == nil
-                  ? "pointer: estimated (server sends no position\(controller.cursorFields.isEmpty ? "" : "; fields: \(controller.cursorFields.joined(separator: ","))"))"
-                  : "pointer: server-tracked")
-                 + " · clicks sent: \(pointerClicks)"
-                 // "sent" above only means the tap was recognised — it says
-                 // nothing about whether the message reached the server (see
-                 // controlChannelAlive's doc comment). This is the one signal
-                 // that can actually tell "clicking does nothing" apart from
-                 // "the input channel silently died".
-                 + (controller.controlChannelAlive ? "" : " · INPUT CHANNEL DEAD"))
-                .font(.caption2)
-                .foregroundStyle(controller.controlChannelAlive ? .white.opacity(0.7) : .red)
-                .padding(6)
-                .background(.black.opacity(0.4), in: Capsule())
-                .position(x: geo.size.width / 2, y: geo.size.height - 40)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
