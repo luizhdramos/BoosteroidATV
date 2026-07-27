@@ -215,13 +215,16 @@ log "Launching Boosteroid under Frida with SSL-pinning bypass"
 # attach-only CLI quirk.
 cat <<'EOF'
 
-  Frida will spawn Boosteroid fresh with SSL-pinning hooks installed.
-  Once you see log lines from the unpinning script (things being hooked),
-  the app should be starting on the emulator screen. Navigate to the
-  QR-code screen or try "Sign in Manually" there. When done, press
-  Ctrl+C here to detach and let this script continue.
+  Frida will spawn Boosteroid fresh, paused, with SSL-pinning hooks about
+  to be installed. Once you see the "[Local::PID]->" prompt, type:
+      %resume
+  and press Enter — that's what actually starts the app running (the
+  --no-pause flag doesn't exist in this frida-tools version, so this is the
+  manual equivalent). The app should then start on the emulator screen.
+  Navigate to the QR-code screen or try "Sign in Manually" there. When
+  done, press Ctrl+C here to detach and let this script continue.
 EOF
-frida -U -f "$PACKAGE" --codeshare akabe1/frida-multiple-unpinning --no-pause || \
+frida -U -f "$PACKAGE" --codeshare akabe1/frida-multiple-unpinning || \
   echo "  frida spawn failed or was interrupted — see the error above, or Ctrl+C is expected/normal if you stopped it manually."
 
 # ---------------------------------------------------------------------------
