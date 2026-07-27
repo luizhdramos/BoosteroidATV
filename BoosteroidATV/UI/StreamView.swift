@@ -125,14 +125,14 @@ struct StreamView: View {
                     onMenu: { showOverlay.toggle() },
                     pointerMode: pointerMode,
                     onPointerPosition: { localCursor = $0 },
-                    onPointerClicked: { pointerClicks += 1 },
-                    // Absolute coordinates must be in the REMOTE desktop's
-                    // pixels, so use the live decoded size when it's known and
-                    // fall back to the requested resolution before first frame.
+                    // Pointer coordinates are in the REMOTE desktop's pixels, so
+                    // use the live decoded size once it's known and fall back to
+                    // the requested resolution before the first frame arrives.
                     surfaceSize: controller.stats.resolutionWidth > 0
                         ? CGSize(width: controller.stats.resolutionWidth,
                                  height: controller.stats.resolutionHeight)
-                        : StreamView.parseResolution(settings.resolution)
+                        : StreamView.parseResolution(settings.resolution),
+                    onPointerClicked: { pointerClicks += 1 }
                 )
                 .ignoresSafeArea()
                 // Compact performance overlay — only when enabled in Settings.
