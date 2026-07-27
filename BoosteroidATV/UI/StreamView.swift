@@ -213,9 +213,15 @@ struct StreamView: View {
             Text((controller.serverCursor == nil
                   ? "pointer: estimated (server sends no position\(controller.cursorFields.isEmpty ? "" : "; fields: \(controller.cursorFields.joined(separator: ","))"))"
                   : "pointer: server-tracked")
-                 + " · clicks sent: \(pointerClicks)")
+                 + " · clicks sent: \(pointerClicks)"
+                 // "sent" above only means the tap was recognised — it says
+                 // nothing about whether the message reached the server (see
+                 // controlChannelAlive's doc comment). This is the one signal
+                 // that can actually tell "clicking does nothing" apart from
+                 // "the input channel silently died".
+                 + (controller.controlChannelAlive ? "" : " · INPUT CHANNEL DEAD"))
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(controller.controlChannelAlive ? .white.opacity(0.7) : .red)
                 .padding(6)
                 .background(.black.opacity(0.4), in: Capsule())
                 .position(x: geo.size.width / 2, y: geo.size.height - 40)
@@ -256,12 +262,18 @@ struct StreamView: View {
     /// (Apple TV only ever gets H.264).
     private var statsOverlay: some View {
         let mbps = Double(controller.stats.bitrateKbps) / 1000
-        let line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps | Stream FPS: \(controller.streamFps) | Latency: \(controller.rttMs)ms"
+        var line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps | Stream FPS: \(controller.streamFps) | Latency: \(controller.rttMs)ms"
+        // Video and input ride entirely separate connections — the control
+        // channel can silently die (network blip, server timeout) while video
+        // keeps playing perfectly, leaving mouse/keyboard/controller dead with
+        // no other visible sign. Surfaced here so it's caught even when
+        // pointer mode is off. See controlChannelAlive's doc comment.
+        if !controller.controlChannelAlive { line += " | INPUT CHANNEL DEAD" }
         return VStack {
             HStack {
                 Text(line)
                     .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(controller.controlChannelAlive ? .white.opacity(0.9) : .red)
                     .shadow(color: .black.opacity(0.8), radius: 2, x: 0, y: 1)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)

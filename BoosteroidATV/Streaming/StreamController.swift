@@ -86,6 +86,21 @@ final class StreamController: NSObject {
     /// Field names of the last cursor message, so an unrecognised shape can be
     /// identified from a real session instead of guessed at.
     private(set) var cursorFields: [String] = []
+    /// Whether BoosteroidControlChannel is still open. ALL input (mouse,
+    /// keyboard, controller) rides this one socket, entirely separate from
+    /// the WebRTC media connection — so if it silently drops mid-session, the
+    /// video keeps playing perfectly fine while every input send just no-ops
+    /// (BoosteroidControlChannel.send() guards on `isOpen` and swallows the
+    /// error with `try?`). Worse, every on-screen "input sent" signal in this
+    /// app (the pointer arrow's position, the "clicks sent" counter, the
+    /// controller poll loop) is updated OPTIMISTICALLY from local state the
+    /// instant we attempt to send, never from a server acknowledgement — so
+    /// none of them can tell "sent" apart from "silently dropped". This flag
+    /// is the one honest signal: it only goes false on a real `.closed`/
+    /// `.failed` event from the socket itself. Surfaced in the stats overlay
+    /// and pointer caption so "clicking does nothing" can be told apart from
+    /// "the input channel died" without guessing.
+    private(set) var controlChannelAlive = true
 
     private var peerConnection: LKRTCPeerConnection?
     /// CONFIRMED 2026-07-23: Boosteroid's webrtcstreamer.js always creates a
@@ -223,11 +238,20 @@ final class StreamController: NSObject {
                 case .controllerAck(let name, _):
                     self.controlLog.append("controller connected: \(name)")
                 case .failed(let message):
+                    self.controlChannelAlive = false
                     self.controlLog.append("socket failed: \(message)")
                     if !self.didStartWebRTC {
                         self.state = .failed(message: "Control channel failed before streaming could start: \(message)")
                     }
-                case .closed, .controllerRumble:
+                    // Past this point we're already streaming — don't tear
+                    // the whole session down over a dead INPUT channel while
+                    // video may still be fine, but do make sure it's visible
+                    // (see controlChannelAlive's doc comment) rather than
+                    // leaving input silently dead with no explanation.
+                case .closed:
+                    self.controlChannelAlive = false
+                    self.controlLog.append("control channel closed")
+                case .controllerRumble:
                     break
                 }
             }
