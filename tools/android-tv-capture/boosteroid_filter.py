@@ -109,3 +109,38 @@ def websocket_message(flow: http.HTTPFlow) -> None:
         "is_text": message.is_text,
         "content": content,
     })
+
+
+def error(flow: http.HTTPFlow) -> None:
+    """
+    Fires when a flow errors out before completing — e.g. the client
+    rejected the connection because it's pinning a specific certificate and
+    doesn't trust mitmproxy's substitute one. This is the one case
+    response() never sees at all, so without this hook a pinned-cert
+    failure would look identical to "the app didn't make any request" —
+    which are two very different problems needing two different fixes.
+    Logged to all-hosts.log (not the strict JSONL) since there's no real
+    response to report, just an outcome.
+    """
+    try:
+        host = flow.request.pretty_host if flow.request else "?"
+        msg = flow.error.msg if flow.error else "unknown error"
+        with open(ALL_HOSTS_LOG, "a") as f:
+            f.write(f"ERROR {host} -> {msg}\n")
+    except Exception:
+        pass
+
+
+def tls_failed_client(data) -> None:
+    """
+    Fires on a failed TLS handshake FROM the client side — the clearest
+    possible signal of certificate pinning (the app opened a connection,
+    saw mitmproxy's certificate, and aborted the handshake rather than
+    trusting it, before any HTTP request could even be formed).
+    """
+    try:
+        sni = getattr(data.conn, "sni", None) or "?"
+        with open(ALL_HOSTS_LOG, "a") as f:
+            f.write(f"TLS HANDSHAKE FAILED (client) sni={sni}\n")
+    except Exception:
+        pass
