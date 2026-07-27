@@ -197,16 +197,17 @@ actor BoosteroidAuthAPI {
             throw AuthError.loginFailed("No HTTP response.")
         }
         guard http.statusCode == 200 else {
-            // CONFIRMED error shape on this same API for an unauthenticated
-            // call (the qr-code/sync polling endpoint): {"error":
-            // {"message":"..."},"error_message":"...",...}. Wrong credentials
-            // specifically on THIS endpoint weren't captured, so fall back to
-            // a raw body preview if that shape doesn't match (e.g. a Laravel
-            // validation-error body instead).
-            let message = (try? JSONDecoder().decode(BoosteroidErrorDTO.self, from: data))?.error.message
-                ?? String(data: data.prefix(300), encoding: .utf8)
-                ?? "HTTP \(http.statusCode)"
-            throw AuthError.loginFailed(message)
+            // DEBUG (2026-07-28): surfacing the FULL raw body — including
+            // error_code/error_number, not just the human-readable message —
+            // because two different real failures ("something wrong with
+            // your data", then "we could not find those credentials" after
+            // fixing headers) both need the numeric code to tell apart
+            // "wrong password" from "wrong client_id/client_secret pairing"
+            // from "missing required x-nonce-17" from something else
+            // entirely. Once the real cause is confirmed, trim this back to
+            // just the human message.
+            let bodyText = String(data: data, encoding: .utf8) ?? "<non-UTF8 body, \(data.count) bytes>"
+            throw AuthError.loginFailed("HTTP \(http.statusCode): \(bodyText)")
         }
         guard let dto = try? JSONDecoder().decode(BoosteroidLoginResponseDTO.self, from: data) else {
             let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "<non-UTF8 body>"
@@ -310,11 +311,4 @@ private struct BoosteroidLoginResponseDTO: Decodable {
         }
     }
     let data: DataDTO
-}
-
-/// CONFIRMED shape for at least the qr-code/sync "Unauthenticated" case on
-/// this same API — used here as a best-effort parse for login errors too.
-private struct BoosteroidErrorDTO: Decodable {
-    struct ErrorDTO: Decodable { let message: String }
-    let error: ErrorDTO
 }
