@@ -200,16 +200,29 @@ echo "  frida-server is running."
 
 # ---------------------------------------------------------------------------
 log "Launching Boosteroid under Frida with SSL-pinning bypass"
+# NOT `objection -g <pkg> explore` — that ATTACHES to an already-running
+# process by name, and since the app was just freshly installed (never
+# launched), there was nothing to attach to ("Unable to find target
+# application"), so no hook was ever injected and pinning stayed fully
+# intact. `frida -f <pkg>` SPAWNS the app instead — starts it fresh, under
+# Frida's control, paused, injects the script, then resumes — which works
+# regardless of whether the app was already running.
+#
+# Using a known public "universal Android SSL-pinning bypass" script
+# (akabe1/frida-multiple-unpinning on Frida CodeShare) instead of objection's
+# own bypass command, since it's equivalent Java-level coverage (OkHttp3,
+# TrustManagerImpl, WebViewClient, Conscrypt, etc.) without objection's
+# attach-only CLI quirk.
 cat <<'EOF'
 
-  This opens objection's interactive console. Once you see its prompt
-  (something like "com.boosteroidtv.streaming on ... [usb] # "), the app
-  should already be starting on the emulator screen with pinning disabled.
-  Navigate to the QR-code screen or try "Sign in Manually" there, THEN come
-  back to this terminal and type:  exit
-  to leave objection and continue this script.
+  Frida will spawn Boosteroid fresh with SSL-pinning hooks installed.
+  Once you see log lines from the unpinning script (things being hooked),
+  the app should be starting on the emulator screen. Navigate to the
+  QR-code screen or try "Sign in Manually" there. When done, press
+  Ctrl+C here to detach and let this script continue.
 EOF
-objection -g "$PACKAGE" explore --startup-command "android sslpinning disable"
+frida -U -f "$PACKAGE" --codeshare akabe1/frida-multiple-unpinning --no-pause || \
+  echo "  frida spawn failed or was interrupted — see the error above, or Ctrl+C is expected/normal if you stopped it manually."
 
 # ---------------------------------------------------------------------------
 log "Done. Captured Boosteroid-related requests:"
