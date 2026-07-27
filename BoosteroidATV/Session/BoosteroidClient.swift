@@ -113,7 +113,7 @@ actor BoosteroidClient {
     //
     // CONFIRMED 2026-07-22: GET /api/v1/user → 200 for an authenticated
     // (cookie) session, body {"data":{"id":<int>,"name":...,"email":...,
-    // "avatar":...,...}}. `id` is also what BoosteroidAuthAPI.completeLogin
+    // "avatar":...,...}}. `id` is also what BoosteroidAuthAPI.login
     // stores as AuthUser.userId (needed as the WebSocket's `uid` param — see
     // BoosteroidRealtimeClient) and what AuthManager.resolveRealtimeCredentials
     // returns.
