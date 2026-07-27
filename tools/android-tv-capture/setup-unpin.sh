@@ -208,23 +208,26 @@ log "Launching Boosteroid under Frida with SSL-pinning bypass"
 # Frida's control, paused, injects the script, then resumes — which works
 # regardless of whether the app was already running.
 #
-# Using a known public "universal Android SSL-pinning bypass" script
-# (akabe1/frida-multiple-unpinning on Frida CodeShare) instead of objection's
-# own bypass command, since it's equivalent Java-level coverage (OkHttp3,
-# TrustManagerImpl, WebViewClient, Conscrypt, etc.) without objection's
-# attach-only CLI quirk.
+# NOT the public akabe1/frida-multiple-unpinning CodeShare script — it
+# crashed ("access violation accessing 0x0" inside frida's java.js bridge)
+# on frida-tools 17.16.4, apparently unmaintained and incompatible with a
+# current Java-bridge API for one of its hooks, aborting before installing
+# ANY of them. unpin.js (in this same folder) is a small, in-house
+# equivalent — SSLContext.init, OkHttp3 CertificatePinner (both overloads),
+# Conscrypt's TrustManagerImpl.verifyChain, and WebViewClient.onReceivedSslError
+# — each wrapped in its own try/catch so one missing class can't take the
+# others down with it.
 cat <<'EOF'
 
-  Frida will spawn Boosteroid fresh, paused, with SSL-pinning hooks about
-  to be installed. Once you see the "[Local::PID]->" prompt, type:
-      %resume
-  and press Enter — that's what actually starts the app running (the
-  --no-pause flag doesn't exist in this frida-tools version, so this is the
-  manual equivalent). The app should then start on the emulator screen.
-  Navigate to the QR-code screen or try "Sign in Manually" there. When
-  done, press Ctrl+C here to detach and let this script continue.
+  Frida will spawn Boosteroid fresh with SSL-pinning hooks about to be
+  installed (it auto-resumes — "Resuming main thread!" in the console
+  confirms this, no manual %resume needed). Watch for "[unpin] hooked ..."
+  lines confirming which hooks actually attached. The app should then start
+  on the emulator screen. Navigate to the QR-code screen or try "Sign in
+  Manually" there. When done, press Ctrl+C here to detach and let this
+  script continue.
 EOF
-frida -U -f "$PACKAGE" --codeshare akabe1/frida-multiple-unpinning || \
+frida -U -f "$PACKAGE" -l "$CAPTURE_DIR/unpin.js" || \
   echo "  frida spawn failed or was interrupted — see the error above, or Ctrl+C is expected/normal if you stopped it manually."
 
 # ---------------------------------------------------------------------------
