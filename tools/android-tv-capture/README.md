@@ -62,14 +62,28 @@ Once you have `boosteroid-capture.jsonl`, either:
 
 ## If something goes wrong
 
-- **Can't sign into Google / Play Store rejects the login**: this is almost
-  always the proxy being on too early — Google blocks sign-in through any
-  intercepting proxy on purpose. Check `adb shell settings get global
-  http_proxy`; if it prints anything other than `null`, turn it off with
-  `adb shell settings put global http_proxy :0`, then try signing in again.
-  Reinstalling the whole emulator (which some threads online suggest) isn't
-  actually the fix — it just resets the proxy setting back to off as a
-  side effect, which is the part that mattered.
+- **Can't sign into Google / Play Store rejects the login**: two known
+  causes, try them in order.
+  1. The proxy being on too early — Google blocks sign-in through any
+     intercepting proxy on purpose. Check `adb shell settings get global
+     http_proxy`; if it prints anything other than `null`, turn it off with
+     `adb shell settings put global http_proxy :0`, then try signing in
+     again. (setup.sh no longer does this to itself — the proxy isn't
+     enabled until after Play Store sign-in/install — but a leftover AVD
+     from before that fix could still have it set.)
+  2. The system image itself: brand-new API levels sometimes fail Google's
+     Play Integrity/attestation check on emulated hardware, which shows up
+     as sign-in silently failing with no useful error. Force an older,
+     better-tested image instead of whatever setup.sh auto-picked:
+     ```
+     grep atv_playstore /tmp/boosteroid-sdk-list.txt   # see what's on offer
+     IMAGE_OVERRIDE='system-images;android-30;google_atv_playstore;x86_64' bash setup.sh
+     ```
+     (swap `x86_64` for `arm64-v8a` if that ABI is listed and you're on
+     Apple Silicon). setup.sh now names the AVD after the image it's built
+     from, so switching images always gets a clean AVD instead of reusing
+     whatever state — possibly corrupted by a earlier failed sign-in — the
+     old one had on disk.
 - **No Android TV + Play Store image was found for your Mac's chip**: the
   script automatically falls back to a phone-shaped Play Store image. The
   TV app may not show up in Play Store search on a phone profile — if so,

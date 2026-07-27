@@ -29,7 +29,7 @@
 #
 set -euo pipefail
 
-AVD_NAME="BoosteroidTV"
+AVD_BASE_NAME="BoosteroidTV"
 MITM_PORT=8080
 MITM_WEB_PORT=8081
 CAPTURE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -141,17 +141,38 @@ log "Full package list (for diagnosis if nothing matches below)"
 "$SDKMANAGER" $SDK_ROOT_FLAG --list | tee /tmp/boosteroid-sdk-list.txt | grep -iE 'system-images.*(playstore|atv|tv)' || \
   echo "  (no playstore/atv/tv images listed at all — full list saved to /tmp/boosteroid-sdk-list.txt for inspection)"
 
-# Android TV Play Store images have historically only shipped for x86/x86_64
-# — list what's actually offered and pick the newest matching API level
-# rather than hardcoding a package string that may not exist any more.
-AVAILABLE="$(grep -E 'system-images;android-[0-9]+;(google_atv|android-tv)_playstore;' /tmp/boosteroid-sdk-list.txt || true)"
-IMAGE="$(echo "$AVAILABLE" | grep "$PREFERRED_ABI" | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
-if [ -z "$IMAGE" ]; then
-  IMAGE="$(echo "$AVAILABLE" | grep 'x86_64' | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
-  [ -n "$IMAGE" ] && echo "  No $PREFERRED_ABI Android TV + Play Store image is published — falling back to x86_64 (runs under translation on Apple Silicon, slower but functional for reaching a login screen)."
-fi
-if [ -z "$IMAGE" ]; then
-  cat <<'EOF'
+if [ -n "${IMAGE_OVERRIDE:-}" ]; then
+  # Escape hatch: `IMAGE_OVERRIDE='system-images;android-30;google_atv_playstore;x86_64' bash setup.sh`
+  # to force a specific image instead of auto-picking one — useful if the
+  # newest available image has broken Google Sign-In (a real, commonly
+  # reported issue with brand-new API levels on emulators) and you want to
+  # try an older, more battle-tested one. Run
+  # `grep atv_playstore /tmp/boosteroid-sdk-list.txt` after any run to see
+  # every option actually available on this machine.
+  IMAGE="$IMAGE_OVERRIDE"
+  echo "  IMAGE_OVERRIDE set — using: $IMAGE"
+else
+  # Android TV Play Store images have historically only shipped for
+  # x86/x86_64. Prefer API 30/31 specifically over "whatever's newest": Google
+  # Sign-In failing on brand-new API level emulator images (Play
+  # Integrity/attestation not yet fully working on emulated hardware) is a
+  # widely reported issue, while 30/31 are the levels most consistently
+  # reported to actually let sign-in complete.
+  AVAILABLE="$(grep -E 'system-images;android-[0-9]+;(google_atv|android-tv)_playstore;' /tmp/boosteroid-sdk-list.txt || true)"
+  IMAGE=""
+  for api in 31 30 29 28; do
+    IMAGE="$(echo "$AVAILABLE" | grep ";android-$api;" | grep "$PREFERRED_ABI" | awk '{print $1}' | head -n1 || true)"
+    [ -n "$IMAGE" ] && { echo "  Preferring API $api (better Google Sign-In track record than newer levels) over the newest available."; break; }
+  done
+  if [ -z "$IMAGE" ]; then
+    IMAGE="$(echo "$AVAILABLE" | grep "$PREFERRED_ABI" | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
+  fi
+  if [ -z "$IMAGE" ]; then
+    IMAGE="$(echo "$AVAILABLE" | grep 'x86_64' | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
+    [ -n "$IMAGE" ] && echo "  No $PREFERRED_ABI Android TV + Play Store image is published — falling back to x86_64 (runs under translation on Apple Silicon, slower but functional for reaching a login screen)."
+  fi
+  if [ -z "$IMAGE" ]; then
+    cat <<'EOF'
 
   No Android TV + Play Store system image is available at all right now.
   Falling back to a regular PHONE profile with Play Store instead — the
@@ -159,10 +180,20 @@ if [ -z "$IMAGE" ]; then
   TV-only apps on phone form factors; if so, we'll sideload the APK instead
   once you've pulled it from your own device with the app already on it).
 EOF
-  IMAGE="$(grep -E 'system-images;android-[0-9]+;google_apis_playstore;' /tmp/boosteroid-sdk-list.txt | grep "$PREFERRED_ABI" | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
+    IMAGE="$(grep -E 'system-images;android-[0-9]+;google_apis_playstore;' /tmp/boosteroid-sdk-list.txt | grep "$PREFERRED_ABI" | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
+  fi
 fi
 [ -n "$IMAGE" ] || die "No Play-Store-capable system image found at all — check /tmp/boosteroid-sdk-list.txt to see everything sdkmanager actually offers, and paste it back so the image detection can be fixed."
 echo "  Using: $IMAGE"
+
+# Name the AVD after the image it's built from (e.g. BoosteroidTV-30-x86_64).
+# Without this, switching IMAGE_OVERRIDE (e.g. to work around a broken Google
+# Sign-In on one image) would silently keep reusing the OLD AVD's on-disk
+# state below — including whatever half-signed-in, possibly-corrupted
+# account/GMS state got left behind by the previous attempt. A new image
+# always gets its own fresh AVD.
+IMAGE_TAG="$(echo "$IMAGE" | sed -E 's/^system-images;android-([0-9]+);[^;]+;([a-zA-Z0-9_-]+)$/\1-\2/')"
+AVD_NAME="${AVD_BASE_NAME}-${IMAGE_TAG}"
 
 log "Installing that system image (this downloads a few GB — grab a coffee)"
 # Same `yes | ...` pipe-vs-pipefail gotcha as the licenses step above — `yes`
