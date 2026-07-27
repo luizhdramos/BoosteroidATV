@@ -58,19 +58,30 @@ fi
 
 # ---------------------------------------------------------------------------
 log "Checking Java (sdkmanager/avdmanager are JVM tools and fail silently without it)"
-if ! command -v java >/dev/null 2>&1; then
-  echo "  No 'java' on PATH — installing Temurin 17 via Homebrew."
+# NOTE: `command -v java` is NOT enough on macOS — Apple ships a stub at
+# /usr/bin/java that exists (so `command -v` finds it) even with zero JDKs
+# installed; it just prints "Unable to locate a Java Runtime" and does
+# nothing useful. The only real test is actually running it.
+java_works() { java -version >/dev/null 2>&1; }
+
+if ! java_works; then
+  echo "  No working Java runtime — installing Temurin 17 via Homebrew."
   brew install --cask temurin17
 fi
-# Homebrew's cask JDKs install under /Library/Java/JavaVirtualMachines but
-# don't always get symlinked onto PATH — resolve JAVA_HOME explicitly so
-# sdkmanager/avdmanager (which shell out to `java`) definitely find it.
-if ! command -v java >/dev/null 2>&1; then
+
+if ! java_works; then
+  # Homebrew's cask JDK installs under /Library/Java/JavaVirtualMachines;
+  # macOS's /usr/bin/java stub is *supposed* to auto-discover it via
+  # java_home, but resolve and export JAVA_HOME explicitly too so
+  # sdkmanager/avdmanager (which shell out to `java`) definitely find it
+  # even if that auto-discovery doesn't kick in for this shell.
   JH="$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home 2>/dev/null || true)"
-  [ -n "$JH" ] || die "Couldn't find a Java install even after installing Temurin 17. Run 'java -version' yourself to see the real error."
+  [ -n "$JH" ] || die "Couldn't find a Java install even after installing Temurin 17. Run 'java -version' yourself in a fresh terminal tab to see the real error."
   export JAVA_HOME="$JH"
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
+
+java_works || die "Java still isn't working after installing Temurin 17 and setting JAVA_HOME=$JAVA_HOME. Open a NEW terminal tab (so it picks up Homebrew's just-installed cask) and re-run this script."
 echo "  java: $(command -v java) ($(java -version 2>&1 | head -n1))"
 
 # ---------------------------------------------------------------------------
