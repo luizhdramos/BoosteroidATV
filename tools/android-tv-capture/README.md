@@ -104,3 +104,47 @@ Once you have `boosteroid-capture.jsonl`, either:
   be using certificate pinning, which would block this approach entirely
   for THAT request. Note which specific screen fails and share that — it
   changes the plan (would need a rooted/patched approach instead).
+
+## Phase 2: certificate pinning (confirmed)
+
+Real-world result: `all-hosts.log` showed repeated
+`TLS HANDSHAKE FAILED (client) sni=cloud.boosteroid.com` entries right when
+attempting "Sign in Manually" — the app talks to the same host as the web
+client, but rejects mitmproxy's certificate. That's pinning, not a network
+or emulator-integrity problem, and installing the CA (already done in phase
+1) can never fix it — pinning checks the actual cert/key, not just "is the
+CA trusted."
+
+Run `setup-unpin.sh` next (after `setup.sh`'s emulator is still running,
+signed in, with Boosteroid installed). It:
+
+1. Pulls the installed Boosteroid APK off that emulator.
+2. Boots a **second**, separate, rootable `google_apis` AVD (no Play Store
+   needed — the APK is sideloaded directly via `adb install`).
+3. Installs `frida-server` on it and `frida-tools`/`objection` on this
+   machine, matched by version and CPU ABI.
+4. Launches Boosteroid under Frida via `objection ... android sslpinning
+   disable` — a universal runtime hook that makes the app accept any
+   certificate, mitmproxy's included.
+
+```
+bash setup-unpin.sh
+```
+
+Known rough edges to watch for (this is a heavier automation than phase 1
+and may need iteration, same as that one did):
+
+- **Split APK**: Play Store sometimes installs apps as multiple split APKs;
+  a plain `pm path` + `adb pull` only grabs the base one. If `adb install`
+  fails on the pulled file, we'll need `pm path --all-splits` and to pull
+  and install every split together.
+- **frida-server version/arch mismatch**: the server binary pushed to the
+  device MUST match the `frida-tools` version installed on this machine
+  exactly, and the CPU ABI (`arm64-v8a` → `arm64`, etc.). The script derives
+  both automatically, but GitHub's release asset naming has changed before —
+  if the download 404s, check
+  `https://github.com/frida/frida/releases/tag/<version>` by hand.
+- **objection's `-g`/`explore` invocation**: assumes a plain `frida-server`
+  + root device (not a Frida Gadget baked into the APK). If it can't attach,
+  paste the exact error back — the fallback is running raw `frida -U -f
+  com.boosteroidtv.streaming -l <unpinning-script>.js --no-pause` instead.
