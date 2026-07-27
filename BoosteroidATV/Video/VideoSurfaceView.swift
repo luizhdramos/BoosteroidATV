@@ -123,22 +123,18 @@ final class VideoSurfaceView: UIView {
     /// A tap is a press and release in quick succession — enough for clicking
     /// buttons, which is what pointer mode is for. Dragging would need the
     /// down/up split and isn't supported yet.
-    /// Pins the remote cursor to the top-left corner so local tracking has a
-    /// KNOWN origin.
+    /// Places the pointer at the centre of the surface when pointer mode starts.
     ///
-    /// Dead-reckoning from an unknown starting point is why the drawn arrow and
-    /// the real pointer disagreed — clicks landed somewhere else entirely (a
-    /// drag once selected text nowhere near where the user aimed). Relative
-    /// movement clamps at the screen edge, so slamming it hard negative parks it
-    /// at (0,0); from there every delta we send keeps both in step.
-    ///
-    /// Sent several times because a single delta is capped at Int16.
+    /// No calibration trick is needed any more: absolute positioning means we
+    /// state where the cursor goes, so it simply arrives there. (An earlier pass
+    /// slammed the cursor into the top-left corner to give dead-reckoning a
+    /// known origin — that was only necessary while we were stuck sending
+    /// relative movement.)
     private func calibratePointer() {
-        for _ in 0..<6 {
-            inputHandler?.sendMouseMove(dx: -32000, dy: -32000)
-        }
-        absolutePointer = .zero
-        pointerPositionHandler?(.zero)
+        let centre = CGPoint(x: streamSurfaceSize.width / 2, y: streamSurfaceSize.height / 2)
+        absolutePointer = centre
+        inputHandler?.sendMouseAbsolute(x: Int(centre.x), y: Int(centre.y))
+        pointerPositionHandler?(centre)
     }
 
     @objc private func handlePointerTap() {
@@ -170,22 +166,16 @@ final class VideoSurfaceView: UIView {
             let sy = Int16(clamping: Int(dy * scale))
             guard sx != 0 || sy != 0 else { return }
 
-            // Relative movement ONLY. It is confirmed and demonstrably works —
-            // a click-drag really did select text on the remote desktop. The
-            // earlier absolute-position attempt was a guess sent ALONGSIDE this
-            // one, and two position sources fighting is a good way to make the
-            // cursor land somewhere unrelated to where you aimed, which is
-            // exactly what was reported.
-            inputHandler?.sendMouseMove(dx: sx, dy: sy)
-
-            // Track where the remote cursor must now be. This is only accurate
-            // because pointer mode pins it to a known corner first (see
-            // calibratePointer) — dead-reckoning from an unknown start was why
-            // the drawn arrow never matched the real pointer.
-            var position = absolutePointer ?? .zero
+            // ABSOLUTE positioning — the mode the web client uses for a desktop
+            // or launcher, now that its real message shape is known (see
+            // InputSender.sendMouseAbsolute). We own the position, so the remote
+            // cursor lands exactly under the drawn arrow instead of drifting.
+            var position = absolutePointer ?? CGPoint(x: streamSurfaceSize.width / 2,
+                                                      y: streamSurfaceSize.height / 2)
             position.x = min(max(position.x + CGFloat(sx), 0), streamSurfaceSize.width)
             position.y = min(max(position.y + CGFloat(sy), 0), streamSurfaceSize.height)
             absolutePointer = position
+            inputHandler?.sendMouseAbsolute(x: Int(position.x), y: Int(position.y))
             pointerPositionHandler?(position)
         case .ended, .cancelled, .failed:
             lastPanTranslation = .zero

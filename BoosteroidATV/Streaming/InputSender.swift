@@ -8,6 +8,8 @@ import GameController
 protocol InputEventHandler: AnyObject {
     func sendKeyEvent(down: Bool, vk: UInt16, scancode: UInt16, modifiers: UInt16)
     func sendMouseMove(dx: Int16, dy: Int16)
+    /// Absolute pointer position, in the streamed surface's pixels.
+    func sendMouseAbsolute(x: Int, y: Int)
     func sendMouseButton(down: Bool, button: UInt8)
     func sendMouseWheel(delta: Int16)
 }
@@ -153,6 +155,30 @@ final class InputSender: InputEventHandler {
             "movementX": Int(dx), "movementY": Int(dy),
             "surfaceWidth": width, "surfaceHeight": height,
             "syncLocalPosition": false, "movementIsAdjusted": true,
+        ]) }
+    }
+
+    /// CONFIRMED 2026-07-25 by reading the web client: it sends TWO different
+    /// move messages, and we had only ported one.
+    ///
+    ///   relative (pointer captured):
+    ///     {type:"mouse", movementX, movementY, surfaceWidth, surfaceHeight,
+    ///      syncLocalPosition, movementIsAdjusted}
+    ///   absolute (desktop / launcher):
+    ///     {type:"mouse", X, Y, surfaceWidth, surfaceHeight}
+    ///
+    /// Note the field names are capital `X`/`Y`, and the absolute form carries
+    /// NO movement fields. An earlier guess used lowercase x/y plus the movement
+    /// fields, which the server simply ignored — the cursor then sat wherever it
+    /// already was, so clicks landed somewhere unrelated to the drawn pointer.
+    /// (The client's own helper is literally named
+    /// `applyRawLockedAbsoluteMouseMove`, and it distinguishes locked /
+    /// absolute / relative modes.)
+    func sendMouseAbsolute(x: Int, y: Int) {
+        let width = surfaceWidth, height = surfaceHeight
+        Task { [controlChannel] in await controlChannel.send(type: "mouse", fields: [
+            "X": x, "Y": y,
+            "surfaceWidth": width, "surfaceHeight": height,
         ]) }
     }
 
