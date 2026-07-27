@@ -158,27 +158,33 @@ final class InputSender: InputEventHandler {
         ]) }
     }
 
-    /// CONFIRMED 2026-07-25 by reading the web client: it sends TWO different
-    /// move messages, and we had only ported one.
+    /// CONFIRMED 2026-07-27 by live-capturing the REAL WebSocket frames the web
+    /// client sends (patched `WebSocket.prototype.send` and watched a live
+    /// session, rather than reading source and guessing at field names). The
+    /// previous "confirmed" shape — `{type:"mouse", X, Y, surfaceWidth,
+    /// surfaceHeight}` — was still wrong: the server silently ignored it
+    /// because it's missing `action`, and `X`/`Y` are NOT pixels.
     ///
-    ///   relative (pointer captured):
-    ///     {type:"mouse", movementX, movementY, surfaceWidth, surfaceHeight,
-    ///      syncLocalPosition, movementIsAdjusted}
-    ///   absolute (desktop / launcher):
-    ///     {type:"mouse", X, Y, surfaceWidth, surfaceHeight}
+    /// The real message, captured clicking around the Steam desktop:
+    ///   {type:"mouse", action:"move", X, Y, offsetX:0, offsetY:0,
+    ///    isVisible:true}
     ///
-    /// Note the field names are capital `X`/`Y`, and the absolute form carries
-    /// NO movement fields. An earlier guess used lowercase x/y plus the movement
-    /// fields, which the server simply ignored — the cursor then sat wherever it
-    /// already was, so clicks landed somewhere unrelated to the drawn pointer.
-    /// (The client's own helper is literally named
-    /// `applyRawLockedAbsoluteMouseMove`, and it distinguishes locked /
-    /// absolute / relative modes.)
+    /// `X`/`Y` are FRACTIONS of the surface (0.0–1.0), not pixel coordinates —
+    /// e.g. `X:0.545` for a click near the middle of the screen. There is no
+    /// `surfaceWidth`/`surfaceHeight` in this message at all (those only
+    /// appear on the relative-move shape in `sendMouseMove`). `offsetX`/
+    /// `offsetY` were always 0 in the capture; `isVisible` was always true.
+    /// This finally explains "the arrow moves but clicking does nothing": our
+    /// button down/up was reaching the server fine, but the server had no idea
+    /// where the cursor was because every move message before it was shaped
+    /// wrong and silently dropped.
     func sendMouseAbsolute(x: Int, y: Int) {
-        let width = surfaceWidth, height = surfaceHeight
-        Task { [controlChannel] in await controlChannel.send(type: "mouse", fields: [
-            "X": x, "Y": y,
-            "surfaceWidth": width, "surfaceHeight": height,
+        let fx = surfaceWidth > 0 ? min(max(Double(x) / Double(surfaceWidth), 0), 1) : 0
+        let fy = surfaceHeight > 0 ? min(max(Double(y) / Double(surfaceHeight), 0), 1) : 0
+        Task { [controlChannel] in await controlChannel.send(type: "mouse", action: "move", fields: [
+            "X": fx, "Y": fy,
+            "offsetX": 0, "offsetY": 0,
+            "isVisible": true,
         ]) }
     }
 

@@ -70,12 +70,23 @@ import Foundation
 //   mouse button:  {type:"mouse", action:"button", isPressed, btn}
 //     (btn = standard DOM MouseEvent.button: 0 left, 1 middle, 2 right)
 //   mouse wheel:   {type:"mouse", action:"wheel", deltaY: ±1}
-//   mouse move:    {type:"mouse", movementX, movementY, surfaceWidth,
-//     surfaceHeight, syncLocalPosition, movementIsAdjusted} — the real web
-//     client ALSO supports absolute/locked-cursor modes with a lot of
-//     adaptive normalization (see cursor-mode-manager.js, NOT ported here);
-//     this client only implements the simpler pure-relative-movement path,
-//     which is what a Bluetooth mouse/trackpad on tvOS produces anyway.
+//   mouse move (relative, pointer captured):
+//     {type:"mouse", movementX, movementY, surfaceWidth, surfaceHeight,
+//      syncLocalPosition, movementIsAdjusted}
+//   mouse move (absolute, desktop/launcher) — CONFIRMED 2026-07-27 by
+//     live-capturing real outgoing WebSocket frames (patched
+//     WebSocket.prototype.send in a real session and clicked around the Steam
+//     desktop), which caught an earlier reading-the-source guess still being
+//     wrong:
+//     {type:"mouse", action:"move", X, Y, offsetX:0, offsetY:0,
+//      isVisible:true}
+//     `X`/`Y` are FRACTIONS of the surface (0.0-1.0), NOT pixels, and there is
+//     NO surfaceWidth/surfaceHeight on this shape at all — those only belong
+//     to the relative-move shape above. An earlier guess sent
+//     {type:"mouse", X, Y, surfaceWidth, surfaceHeight} (no `action`, raw
+//     pixel X/Y) — the server silently dropped it since it doesn't match
+//     either real shape, so the cursor never actually moved server-side even
+//     though our own drawn arrow did, and clicks landed nowhere useful.
 //   mouse connected (send once before the first move/button):
 //     {type:"mouse", action:"connected", LeftBtnState:false,
 //      MiddleBtnState:false, RightBtnState:false}
@@ -107,9 +118,9 @@ import Foundation
 //     action:"rumble", id, left, right} — documented for completeness;
 //     not wired to any vibration API on this client yet.
 //
-// NOT implemented: absolute/locked mouse cursor modes, and exact diagonal
-// D-pad hat values — both precision/cosmetic gaps, see TODOs above and in
-// InputSender, not correctness gaps.
+// NOT implemented: locked/relative-in-pointer-lock cursor mode (only plain
+// relative and absolute are used), and exact diagonal D-pad hat values — both
+// precision/cosmetic gaps, not correctness gaps.
 actor BoosteroidControlChannel {
     enum IncomingEvent {
         /// CONFIRMED 2026-07-23: the server pushes `{"type":"settings",
