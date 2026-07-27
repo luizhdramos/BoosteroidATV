@@ -188,12 +188,17 @@ struct StreamView: View {
                 return CGPoint(x: geo.size.width / 2 + localCursor.x,
                                y: geo.size.height / 2 + localCursor.y)
             }()
-            Image(systemName: "cursorarrow.fill")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.9), radius: 2)
-                .position(x: min(max(point.x, 0), geo.size.width),
-                          y: min(max(point.y, 0), geo.size.height))
+            // Drawn as a shape rather than an SF Symbol: "cursorarrow.fill"
+            // isn't available on tvOS, and Image(systemName:) renders NOTHING
+            // for an unknown name — which is why the pointer vanished entirely.
+            // A path can't go missing.
+            PointerArrow()
+                .fill(.white)
+                .overlay(PointerArrow().stroke(.black.opacity(0.85), lineWidth: 1.5))
+                .frame(width: 16, height: 24)
+                // The tip is the click point, so offset the shape's centre.
+                .position(x: min(max(point.x, 0), geo.size.width) + 8,
+                          y: min(max(point.y, 0), geo.size.height) + 12)
 
             // Says whether the drawn arrow reflects the REAL remote cursor or
             // only our own dead-reckoning. It matters: with dead-reckoning the
@@ -209,6 +214,24 @@ struct StreamView: View {
                 .position(x: geo.size.width / 2, y: geo.size.height - 40)
         }
         .allowsHitTesting(false)
+    }
+
+    /// A classic arrow cursor, drawn as a path so it can't depend on an SF
+    /// Symbol name being available. Its tip sits at (0,0) of the frame.
+    private struct PointerArrow: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            let w = rect.width, h = rect.height
+            path.move(to: CGPoint(x: 0, y: 0))
+            path.addLine(to: CGPoint(x: 0, y: h * 0.78))
+            path.addLine(to: CGPoint(x: w * 0.28, y: h * 0.60))
+            path.addLine(to: CGPoint(x: w * 0.46, y: h))
+            path.addLine(to: CGPoint(x: w * 0.68, y: h * 0.90))
+            path.addLine(to: CGPoint(x: w * 0.50, y: h * 0.52))
+            path.addLine(to: CGPoint(x: w, y: h * 0.50))
+            path.closeSubpath()
+            return path
+        }
     }
 
     /// Discreet single-line performance overlay pinned to the top-left edge:
