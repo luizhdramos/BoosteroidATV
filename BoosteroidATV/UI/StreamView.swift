@@ -128,7 +128,14 @@ struct StreamView: View {
                         localCursor.x += dx
                         localCursor.y += dy
                     },
-                    onPointerClicked: { pointerClicks += 1 }
+                    onPointerClicked: { pointerClicks += 1 },
+                    // Absolute coordinates must be in the REMOTE desktop's
+                    // pixels, so use the live decoded size when it's known and
+                    // fall back to the requested resolution before first frame.
+                    surfaceSize: controller.stats.resolutionWidth > 0
+                        ? CGSize(width: controller.stats.resolutionWidth,
+                                 height: controller.stats.resolutionHeight)
+                        : StreamView.parseResolution(settings.resolution)
                 )
                 .ignoresSafeArea()
                 // Compact performance overlay — only when enabled in Settings.
@@ -219,6 +226,15 @@ struct StreamView: View {
                 .position(x: geo.size.width / 2, y: geo.size.height - 40)
         }
         .allowsHitTesting(false)
+    }
+
+    /// "1920x1080" → CGSize, for the pre-first-frame fallback above.
+    static func parseResolution(_ resolution: String) -> CGSize {
+        let parts = resolution.split(separator: "x")
+        guard parts.count == 2, let w = Double(parts[0]), let h = Double(parts[1]) else {
+            return CGSize(width: 1920, height: 1080)
+        }
+        return CGSize(width: w, height: h)
     }
 
     /// A classic arrow cursor, drawn as a path so it can't depend on an SF

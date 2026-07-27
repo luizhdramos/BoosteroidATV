@@ -45,6 +45,13 @@ final class VideoSurfaceView: UIView {
     }
     private weak var pointerPanRecognizer: UIPanGestureRecognizer?
     private weak var pointerTapRecognizer: UITapGestureRecognizer?
+
+    /// Pointer position in the streamed surface's pixels, tracked so pointer
+    /// mode can send ABSOLUTE coordinates. Relative movement is confirmed but
+    /// was ignored on a desktop/launcher screen — see sendMouseAbsolute.
+    private var absolutePointer: CGPoint?
+    /// The streamed surface size, needed to clamp and to start at its centre.
+    var streamSurfaceSize: CGSize = CGSize(width: 1920, height: 1080)
     /// Last pan translation, so movement can be sent as deltas.
     private var lastPanTranslation: CGPoint = .zero
 
@@ -140,7 +147,20 @@ final class VideoSurfaceView: UIView {
             let sx = Int16(clamping: Int(dx * scale))
             let sy = Int16(clamping: Int(dy * scale))
             guard sx != 0 || sy != 0 else { return }
+
+            // Send BOTH: relative movement (confirmed, and what a
+            // pointer-captured game expects) and an absolute position (the
+            // unverified attempt for desktop/launcher screens, which ignored
+            // relative input entirely).
             inputHandler?.sendMouseMove(dx: sx, dy: sy)
+
+            var position = absolutePointer ?? CGPoint(x: streamSurfaceSize.width / 2,
+                                                      y: streamSurfaceSize.height / 2)
+            position.x = min(max(position.x + CGFloat(sx), 0), streamSurfaceSize.width)
+            position.y = min(max(position.y + CGFloat(sy), 0), streamSurfaceSize.height)
+            absolutePointer = position
+            inputHandler?.sendMouseAbsolute(x: Int(position.x), y: Int(position.y))
+
             pointerMovedHandler?(CGFloat(sx), CGFloat(sy))
         case .ended, .cancelled, .failed:
             lastPanTranslation = .zero
@@ -408,6 +428,9 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
     var pointerMode: Bool = false
     /// Each relative mouse delta sent, mirrored so the UI can draw a pointer.
     var onPointerMoved: (CGFloat, CGFloat) -> Void = { _, _ in }
+    /// Streamed surface size, so absolute pointer coordinates are in the remote
+    /// desktop's own pixels.
+    var surfaceSize: CGSize = CGSize(width: 1920, height: 1080)
     /// Fired per recognised click, so the UI can prove the tap is arriving.
     var onPointerClicked: () -> Void = {}
 
@@ -417,6 +440,7 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
         vc.videoSurface.pointerModeActive = pointerMode
         vc.videoSurface.pointerMovedHandler = onPointerMoved
         vc.videoSurface.pointerClickedHandler = onPointerClicked
+        vc.videoSurface.streamSurfaceSize = surfaceSize
         Task { @MainActor in
             streamController.bindVideoView(vc.videoSurface)
         }
@@ -429,6 +453,7 @@ struct VideoSurfaceViewRepresentable: UIViewControllerRepresentable {
         vc.videoSurface.pointerModeActive = pointerMode
         vc.videoSurface.pointerMovedHandler = onPointerMoved
         vc.videoSurface.pointerClickedHandler = onPointerClicked
+        vc.videoSurface.streamSurfaceSize = surfaceSize
         vc.controllerUserInteractionEnabled = showOverlay
         vc.videoSurface.overlayVisible = showOverlay
     }
