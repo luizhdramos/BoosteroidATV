@@ -57,6 +57,23 @@ if ! command -v mitmweb >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
+log "Checking Java (sdkmanager/avdmanager are JVM tools and fail silently without it)"
+if ! command -v java >/dev/null 2>&1; then
+  echo "  No 'java' on PATH — installing Temurin 17 via Homebrew."
+  brew install --cask temurin17
+fi
+# Homebrew's cask JDKs install under /Library/Java/JavaVirtualMachines but
+# don't always get symlinked onto PATH — resolve JAVA_HOME explicitly so
+# sdkmanager/avdmanager (which shell out to `java`) definitely find it.
+if ! command -v java >/dev/null 2>&1; then
+  JH="$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home 2>/dev/null || true)"
+  [ -n "$JH" ] || die "Couldn't find a Java install even after installing Temurin 17. Run 'java -version' yourself to see the real error."
+  export JAVA_HOME="$JH"
+  export PATH="$JAVA_HOME/bin:$PATH"
+fi
+echo "  java: $(command -v java) ($(java -version 2>&1 | head -n1))"
+
+# ---------------------------------------------------------------------------
 log "Installing Android command-line tools (if needed)"
 if ! command -v sdkmanager >/dev/null 2>&1 && [ ! -d "$HOME/Library/Android/sdk" ]; then
   brew install --cask android-commandlinetools
@@ -81,8 +98,18 @@ SDKMANAGER="$(find "$ANDROID_SDK_ROOT" -name sdkmanager -type f 2>/dev/null | he
 AVDMANAGER="$(find "$ANDROID_SDK_ROOT" -name avdmanager -type f 2>/dev/null | head -n1)"
 [ -n "$AVDMANAGER" ] || die "Couldn't find avdmanager under $ANDROID_SDK_ROOT."
 
+# --sdk_root is passed explicitly on every call below — without it, some
+# cmdline-tools versions default to installing relative to their own
+# (read-only, Homebrew-managed) binary location instead of $ANDROID_SDK_ROOT.
+SDK_ROOT_FLAG="--sdk_root=$ANDROID_SDK_ROOT"
+
+log "Verifying sdkmanager actually runs (this is where a missing/wrong Java shows up)"
+if ! "$SDKMANAGER" $SDK_ROOT_FLAG --version; then
+  die "sdkmanager failed to run (see the real error above) — usually a Java version mismatch. Try 'brew install --cask temurin17', open a NEW terminal tab, then re-run this script."
+fi
+
 log "Accepting SDK licenses (non-interactive)"
-yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+yes | "$SDKMANAGER" $SDK_ROOT_FLAG --licenses
 
 # ---------------------------------------------------------------------------
 log "Finding the best Android TV + Play Store system image"
@@ -93,10 +120,14 @@ else
   PREFERRED_ABI="x86_64"
 fi
 
+log "Full package list (for diagnosis if nothing matches below)"
+"$SDKMANAGER" $SDK_ROOT_FLAG --list | tee /tmp/boosteroid-sdk-list.txt | grep -iE 'system-images.*(playstore|atv|tv)' || \
+  echo "  (no playstore/atv/tv images listed at all — full list saved to /tmp/boosteroid-sdk-list.txt for inspection)"
+
 # Android TV Play Store images have historically only shipped for x86/x86_64
 # — list what's actually offered and pick the newest matching API level
 # rather than hardcoding a package string that may not exist any more.
-AVAILABLE="$("$SDKMANAGER" --list 2>/dev/null | grep -E 'system-images;android-[0-9]+;(google_atv|android-tv)_playstore;' || true)"
+AVAILABLE="$(grep -E 'system-images;android-[0-9]+;(google_atv|android-tv)_playstore;' /tmp/boosteroid-sdk-list.txt || true)"
 IMAGE="$(echo "$AVAILABLE" | grep "$PREFERRED_ABI" | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
 if [ -z "$IMAGE" ]; then
   IMAGE="$(echo "$AVAILABLE" | grep 'x86_64' | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
@@ -111,13 +142,13 @@ if [ -z "$IMAGE" ]; then
   TV-only apps on phone form factors; if so, we'll sideload the APK instead
   once you've pulled it from your own device with the app already on it).
 EOF
-  IMAGE="$(echo "$("$SDKMANAGER" --list 2>/dev/null | grep -E 'system-images;android-[0-9]+;google_apis_playstore;' )" | grep "$PREFERRED_ABI" | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
+  IMAGE="$(grep -E 'system-images;android-[0-9]+;google_apis_playstore;' /tmp/boosteroid-sdk-list.txt | grep "$PREFERRED_ABI" | sort -t';' -k2 -V | tail -n1 | awk '{print $1}' || true)"
 fi
-[ -n "$IMAGE" ] || die "No Play-Store-capable system image found at all. Open Android Studio's SDK Manager and install one manually (look for 'Google Play' images), then re-run this script."
+[ -n "$IMAGE" ] || die "No Play-Store-capable system image found at all — check /tmp/boosteroid-sdk-list.txt to see everything sdkmanager actually offers, and paste it back so the image detection can be fixed."
 echo "  Using: $IMAGE"
 
 log "Installing that system image (this downloads a few GB — grab a coffee)"
-yes | "$SDKMANAGER" --install "$IMAGE" "platform-tools" "emulator" >/dev/null
+yes | "$SDKMANAGER" $SDK_ROOT_FLAG --install "$IMAGE" "platform-tools" "emulator"
 
 ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
 EMULATOR_BIN="$ANDROID_SDK_ROOT/emulator/emulator"
