@@ -164,11 +164,22 @@ actor BoosteroidAuthAPI {
         // (not a real tvOS device) — using them verbatim maximizes the odds
         // of matching a known-accepted signature; TODO(protocol): swap in
         // real Apple TV device info once it's confirmed these fields aren't
-        // validated/pinned to a specific value. `x-nonce-17`'s derivation is
-        // still unknown (could be a harmless counter, could be a signed
-        // anti-tampering nonce) — left out for now; if "something wrong with
-        // your data" persists even with the headers below, this is the next
-        // thing to investigate.
+        // validated/pinned to a specific value.
+        //
+        // `x-nonce-17`: adding the OTHER headers above got past "something
+        // wrong with your data" but then hit a real, specific 422 "we could
+        // not find those credentials" (error_code 142299) with genuinely
+        // correct credentials (confirmed working seconds later on the real
+        // Android app with the exact same email/password). CONFIRMED
+        // 2026-07-28 by capturing a SECOND, separate real login — made
+        // significantly later than the first capture — that this header's
+        // value is "18211" BOTH times. A real per-request nonce or signature
+        // would differ between two logins made minutes apart; an identical
+        // value both times means it's a fixed constant baked into this app
+        // build (v.2.5.10.tv), not something computed per-call, and
+        // apparently required (likely a WAF/gateway fingerprint check) even
+        // though the request body/other headers alone weren't enough.
+        request.setValue("18211", forHTTPHeaderField: "x-nonce-17")
         request.setValue("BoosteroidAndroidTVClient v.2.5.10.tv; Android 14; sdk_gphone64_arm64", forHTTPHeaderField: "User-Agent")
         request.setValue("emu64a sdk_gphone64_arm64 34", forHTTPHeaderField: "device-name")
         request.setValue("", forHTTPHeaderField: "device-uniq-id")
