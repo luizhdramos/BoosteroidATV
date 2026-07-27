@@ -44,8 +44,16 @@ struct LoginView: View {
             }
 
             VStack(spacing: 16) {
+                // .textInputAutocapitalization(.never) matters here: without
+                // it, tvOS's on-screen keyboard capitalizes the first letter
+                // by default, silently turning "name@x.com" into
+                // "Name@x.com" — a real reported symptom ("we could not find
+                // those credentials" with a confirmed-correct password) that
+                // this fixes.
                 TextField("Email", text: $email)
                     .textContentType(.username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                 SecureField("Password", text: $password)
                     .textContentType(.password)
             }

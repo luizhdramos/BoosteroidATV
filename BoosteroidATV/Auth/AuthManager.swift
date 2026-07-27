@@ -77,6 +77,11 @@ final class AuthManager {
     /// See BoosteroidAuthAPI.login(email:password:) for the confirmed
     /// protocol (captured from the real Android TV app).
     func submitCredentials(email: String, password: String) {
+        // Trim the email only — tvOS remote-driven text input can leave
+        // stray leading/trailing whitespace, and unlike the password this is
+        // never a legitimate part of the value. Password is passed through
+        // untouched: a trailing space could genuinely be part of it.
+        let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
         loginTask?.cancel()
         loginTask = Task {
             loginPhase = .exchangingTokens
