@@ -19,10 +19,17 @@ mitmproxy, and wires the emulator to send its traffic through it.
 through Google sign-in. Google Sign-In actively detects and refuses to work
 through an intercepting proxy (a real anti-abuse measure, not a bug) — if
 the proxy were on from boot, logging into Google would just fail outright.
-The script only turns the proxy on AFTER Play Store sign-in/install is
-done, right before launching Boosteroid — so only Boosteroid's own traffic
-ever goes through mitmproxy. Don't open Boosteroid before that point, or its
-first-run requests won't be captured.
+
+Once Play Store sign-in/install is done, the script **restarts the same
+emulator** (its disk state — the signed-in account, the installed app —
+survives the restart) this time WITH the proxy on, using the emulator's own
+`-http-proxy` flag rather than an in-Android settings toggle. That flag
+transparently redirects ALL network traffic at the emulator's network layer
+regardless of what networking code an app uses; a softer, Android-side
+"system proxy" setting sounds gentler but a lot of apps (raw sockets, many
+WebSocket libraries) simply ignore it, which is exactly why an earlier
+version of this script captured nothing at all. Don't open Boosteroid
+before that restart finishes, or its first-run requests won't be captured.
 
 It pauses at exactly three points, because these genuinely require a human
 (Android/Google intentionally don't allow scripting past them):

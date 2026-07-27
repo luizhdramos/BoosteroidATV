@@ -286,9 +286,35 @@ log "Opening the Play Store (no proxy active yet — Google Sign-In needs a clea
 pause "Sign in with your Google account in the Play Store (I never see or touch this — do it directly on the emulator), then install 'Boosteroid Cloud Gaming TV'. Do NOT open Boosteroid yet — the proxy isn't on until the next step."
 
 # ---------------------------------------------------------------------------
-log "Play Store sign-in/install is done — NOW turning the proxy on, so only Boosteroid's own traffic gets captured"
-"$ADB" shell settings put global http_proxy "10.0.2.2:$MITM_PORT"
-sleep 1
+log "Play Store sign-in/install is done — restarting the emulator WITH the proxy on"
+# Earlier versions of this script used \`adb shell settings put global
+# http_proxy\` here instead of a real restart, on the theory that it'd be
+# gentler (no reboot) than the emulator's own -http-proxy flag. Turned out to
+# be the reason NOTHING got captured at all, not even in all-hosts.log:
+# that Settings.Global key is a soft, cooperative signal most of the standard
+# Android HTTP stack respects, but plenty of apps (anything using raw
+# sockets, many WebSocket libraries, some custom network stacks) simply
+# never look at it and bypass it entirely. The emulator's -http-proxy flag,
+# by contrast, transparently redirects ALL traffic at the network layer
+# regardless of what the app does — which is exactly what was already
+# proven to work back when everything (including Google Sign-In) was being
+# routed through mitmproxy. So: keep that first, proxy-free boot purely to
+# get through Google Sign-In safely, then restart the SAME AVD (its disk
+# state — the signed-in account, the installed app — persists across a
+# restart) with the proxy flag this time, for the part that actually needs
+# reliable interception.
+"$ADB" emu kill || true
+sleep 3
+"$EMULATOR_BIN" -avd "$AVD_NAME" -no-snapshot-load -http-proxy "http://127.0.0.1:$MITM_PORT" >>/tmp/boosteroid-emulator.log 2>&1 &
+EMULATOR_PID=$!
+echo "  Emulator PID: $EMULATOR_PID (restarted, proxy on)"
+
+"$ADB" wait-for-device
+echo "  Waiting for Android to finish booting again..."
+until [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do
+  sleep 2
+done
+echo "  Booted."
 
 # ---------------------------------------------------------------------------
 log "Launching Boosteroid"
