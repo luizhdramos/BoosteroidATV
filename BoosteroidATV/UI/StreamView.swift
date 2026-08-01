@@ -56,61 +56,50 @@ struct StreamView: View {
                 if let errorMessage {
                     statusView(title: "Couldn't Start Session", message: errorMessage)
                 } else {
-                    VStack(spacing: 20) {
-                        ProgressView().scaleEffect(2).tint(.white)
-                        Text("Connecting to \(game.title)...")
+                    VStack(spacing: 32) {
+                        Text(game.title)
+                            .font(.title2.weight(.semibold))
                             .foregroundStyle(.white)
-                        // Live connect stage, so a stuck session shows WHERE
-                        // it's stuck (control channel / WebRTC step) instead of
-                        // spinning silently.
-                        if !controller.stage.isEmpty {
-                            Text(controller.stage)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 80)
-                        }
-                        // last-session (polled by createAndAwaitSession) is
-                        // the CONFIRMED authoritative "are we still queued"
-                        // signal (EN -> LI), but has no numeric position.
-                        // BoosteroidRealtimeClient's WebSocket feed supplies
-                        // that number separately when available — CONFIRMED
-                        // real-world behavior: queue position can rise as
-                        // well as fall (higher-tier accounts join ahead),
-                        // even on a paid account, so this can take a while.
-                        // Always shown while connecting. Previously gated on
-                        // queueAttempt > 0, which hid EVERYTHING whenever the
-                        // poll loop was silently skipping (see the
-                        // last-session mismatch note in BoosteroidClient) —
-                        // leaving just "Connecting…" with no explanation.
-                        VStack(spacing: 8) {
-                            Group {
-                                if let queuePosition {
-                                    Text("Queue position: \(queuePosition)" + (queueEta.map { " — ~\($0)s" } ?? ""))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.white)
-                                }
-                                Text("Status: \(queueStatus.isEmpty ? "waiting" : queueStatus) — waited \(Int(Date().timeIntervalSince(queueStartedAt)))s")
-                                    .font(.caption)
+
+                        // Commercial-style progress timeline: Queue -> Machine
+                        // Found -> Preparing/Ready, filling with the brand's
+                        // purple gradient (same as the bolt logo) as each
+                        // stage completes, instead of a generic spinner.
+                        sessionTimeline
+                            .frame(maxWidth: 720)
+                            .animation(.easeInOut(duration: 0.4), value: currentStageIndex)
+
+                        Text(timelineDetail)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 60)
+
+                        // Secondary diagnostics, kept small: most of the time
+                        // there's nothing useful here, but some games never
+                        // report a numeric queue position or hit an unusual
+                        // claim response, and this is what surfaces that.
+                        VStack(spacing: 4) {
+                            Text("Status: \(queueStatus.isEmpty ? "waiting" : queueStatus) — waited \(Int(Date().timeIntervalSince(queueStartedAt)))s")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            if !queueDebug.isEmpty {
+                                Text(queueDebug)
+                                    .font(.caption2)
                                     .foregroundStyle(.secondary)
-                                if !queueDebug.isEmpty {
-                                    Text(queueDebug)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if !claimResult.isEmpty {
-                                    Text(claimResult)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .multilineTextAlignment(.center)
-                                        .padding(.horizontal, 60)
-                                }
+                            }
+                            if !claimResult.isEmpty {
+                                Text(claimResult)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 60)
                             }
                         }
+
                         Button("Cancel") { onDismiss() }
                             .buttonStyle(.bordered)
                             .tint(.gray)
-                            .padding(.top, 8)
                     }
                 }
             case .streaming:
@@ -314,6 +303,89 @@ struct StreamView: View {
                 .buttonStyle(.bordered)
                 .tint(.gray)
         }
+    }
+
+    // MARK: Loading Timeline
+
+    /// Coarse progress for the loading timeline: 0 = still queued, 1 = a
+    /// machine has been matched/claimed, 2 = WebRTC is actively negotiating
+    /// (StreamController.stage becomes non-empty once controller.connect()
+    /// starts — see StreamController.swift).
+    private var currentStageIndex: Int {
+        if !controller.stage.isEmpty { return 2 }
+        if queueStatus == "LI" || didClaimMachine { return 1 }
+        return 0
+    }
+
+    /// CONFIRMED stage ordering (StreamController.swift): "Offer accepted —
+    /// waiting for video…" is the last stage string before frames actually
+    /// arrive and state flips to .streaming — treat it as "done preparing".
+    private var isPreparingFinished: Bool {
+        controller.stage.contains("Offer accepted")
+    }
+
+    private var timelineDetail: String {
+        switch currentStageIndex {
+        case 0:
+            if let queuePosition {
+                return "Posição na fila: \(queuePosition)" + (queueEta.map { " — cerca de \($0)s" } ?? "")
+            }
+            return "Aguardando na fila…"
+        case 1:
+            return "Máquina encontrada — confirmando sessão…"
+        default:
+            if isPreparingFinished {
+                return "Máquina finalizada — carregando o jogo…"
+            }
+            return controller.stage.isEmpty ? "Preparando a máquina…" : controller.stage
+        }
+    }
+
+    private var sessionTimeline: some View {
+        let index = currentStageIndex
+        let labels = ["Fila", "Máquina Encontrada", isPreparingFinished ? "Máquina Finalizada" : "Preparando Máquina"]
+        return HStack(alignment: .top, spacing: 0) {
+            ForEach(labels.indices, id: \.self) { i in
+                timelineNode(label: labels[i], reached: i <= index, active: i == index)
+                if i < labels.count - 1 {
+                    timelineConnector(filled: i < index)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func timelineNode(label: String, reached: Bool, active: Bool) -> some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(reached ? AnyShapeStyle(BoosteroidTheme.brandGradient) : AnyShapeStyle(Color.white.opacity(0.15)))
+                    .frame(width: 22, height: 22)
+                if active {
+                    Circle()
+                        .stroke(BoosteroidTheme.brandGradient, lineWidth: 2)
+                        .frame(width: 32, height: 32)
+                } else if reached {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(.white)
+                }
+            }
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(reached ? .white : .secondary)
+                .multilineTextAlignment(.center)
+                .frame(width: 130)
+        }
+    }
+
+    @ViewBuilder
+    private func timelineConnector(filled: Bool) -> some View {
+        Rectangle()
+            .fill(filled ? AnyShapeStyle(BoosteroidTheme.brandGradient) : AnyShapeStyle(Color.white.opacity(0.15)))
+            .frame(height: 3)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 11) // centers on the 22pt circle above
     }
 
     private func start() async {
