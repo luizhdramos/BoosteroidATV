@@ -1,6 +1,24 @@
 import SwiftUI
 import UIKit
 
+/// Windows Virtual-Key codes — shared by the top-bar overlay (Steam Overlay
+/// hotkey) and VirtualKeyboardView. Keys are sent as Windows VK codes over
+/// the WebRTC data channel regardless of source (hardware keyboard, on-screen
+/// keyboard, or a synthesized combo like Shift+Tab) — see InputSender and
+/// VideoSurfaceView's HID→VK table.
+private enum VK {
+    static let back: UInt16 = 0x08
+    static let tab: UInt16 = 0x09
+    static let enter: UInt16 = 0x0D
+    static let shift: UInt16 = 0x10
+    static let escape: UInt16 = 0x1B
+    static let space: UInt16 = 0x20
+    static let left: UInt16 = 0x25
+    static let up: UInt16 = 0x26
+    static let right: UInt16 = 0x27
+    static let down: UInt16 = 0x28
+}
+
 /// Drives StreamController against BoosteroidClient's CONFIRMED,
 /// end-to-end-verified session lifecycle (enqueue -> poll last-session ->
 /// session/details -> WebRTC signaling — see BoosteroidClient.swift's
@@ -25,6 +43,13 @@ struct StreamView: View {
     /// real cursor because pointer mode pins it to (0,0) when switched on.
     @State private var localCursor: CGPoint = .zero
     @State private var showKeyboard = false
+    /// The "More Options" pill's dropdown panel (Back to Menu / Performance
+    /// Overlay / Stream Details), nested under the main top bar.
+    @State private var showMoreOptions = false
+    /// nil = follow the session's saved Settings value; set once the user
+    /// flips it from the in-stream Performance Overlay toggle, for the rest
+    /// of this session only (not persisted — Settings remains the default).
+    @State private var statsOverlayOverride: Bool?
     @State private var errorMessage: String?
     @State private var queueAttempt = 0
     @State private var queueStatus = ""
@@ -86,7 +111,14 @@ struct StreamView: View {
                     // Focus must reach SwiftUI whenever an overlay is up, or the
                     // on-screen keyboard's keys can't be selected.
                     showOverlay: showOverlay || showKeyboard,
-                    onMenu: { showOverlay.toggle() },
+                    onMenu: {
+                        if showOverlay {
+                            showOverlay = false
+                            showMoreOptions = false
+                        } else {
+                            showOverlay = true
+                        }
+                    },
                     pointerMode: pointerMode,
                     onPointerPosition: { localCursor = $0 },
                     // Pointer coordinates are in the REMOTE desktop's pixels, so
@@ -98,8 +130,9 @@ struct StreamView: View {
                         : StreamView.parseResolution(settings.resolution)
                 )
                 .ignoresSafeArea()
-                // Compact performance overlay — only when enabled in Settings.
-                if settings.showStatsOverlay {
+                // Compact performance overlay — only when enabled (Settings'
+                // saved value, unless overridden live from the More Options panel).
+                if showStats {
                     statsOverlay
                 }
                 // The remote desktop's pointer isn't drawn into the video, so
@@ -116,7 +149,7 @@ struct StreamView: View {
                     )
                     .padding(40)
                 } else if showOverlay {
-                    overlay
+                    topBarOverlay
                 }
             case .disconnected(let reason):
                 statusView(title: "Disconnected", message: reason)
@@ -230,47 +263,159 @@ struct StreamView: View {
         .allowsHitTesting(false)
     }
 
-    private var overlay: some View {
-        ZStack {
-            Color.black.opacity(0.55).ignoresSafeArea()
-            VStack(spacing: 28) {
-                Text(game.title)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                Text("\(Int(controller.stats.fps)) fps · \(controller.stats.bitrateKbps) kbps · \(controller.stats.resolutionWidth)x\(controller.stats.resolutionHeight)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 24) {
-                    Button("Resume") { showOverlay = false }
-                        .buttonStyle(.bordered)
-                        .tint(.gray)
-                    // Typing and pointing are the two things a gamepad can't do
-                    // — needed for launchers, logins and in-game search.
-                    Button("Keyboard") {
+    // MARK: In-Stream Top Bar
+    //
+    // Design: a slim HUD bar pinned to the top of the screen (game still
+    // visible underneath), not a full-screen pause modal — Disconnect on the
+    // left, Keyboard / Pointer / Steam Overlay / More Options on the right.
+    // The Menu/back remote button opens it; pressing Menu again collapses it
+    // (the More Options panel, if open, collapses first — see onExitCommand
+    // below and onMenu in the .streaming case above).
+
+    private var showStats: Bool { statsOverlayOverride ?? settings.showStatsOverlay }
+
+    private var topBarOverlay: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                Button {
+                    controller.disconnect()
+                    onDismiss()
+                } label: {
+                    Label("Disconnect", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .tint(.gray)
+
+                Spacer()
+
+                HStack(spacing: 14) {
+                    topBarPill("Keyboard", systemImage: "keyboard") {
                         showOverlay = false
                         showKeyboard = true
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.gray)
-                    Button(pointerMode ? "Pointer: On" : "Pointer: Off") {
+                    topBarPill("Pointer", systemImage: pointerMode ? "cursorarrow.click.2" : "cursorarrow",
+                               active: pointerMode) {
                         pointerMode.toggle()
                         showOverlay = false
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(pointerMode ? .green : .gray)
-                    Button("Leave Game") {
-                        controller.disconnect()
-                        onDismiss()
+                    // Sends Shift+Tab — the standard Steam in-game-overlay
+                    // hotkey — straight to the remote machine, then hands
+                    // input back to the video surface immediately: Steam's
+                    // overlay renders inside the stream itself, so it needs
+                    // direct remote input from here on, not this app's menu.
+                    topBarPill("Steam Overlay", systemImage: "square.stack") {
+                        sendSteamOverlayHotkey()
+                        showOverlay = false
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .foregroundStyle(.white)
+                    topBarPill("More Options", systemImage: "ellipsis.circle", active: showMoreOptions) {
+                        showMoreOptions.toggle()
+                    }
                 }
             }
-            .padding(48)
+            .padding(.horizontal, 32)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
+            .background(
+                LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 160)
+                    .ignoresSafeArea(edges: .top),
+                alignment: .top
+            )
+
+            if showMoreOptions {
+                HStack {
+                    Spacer()
+                    moreOptionsPanel
+                        .padding(.trailing, 32)
+                        .padding(.top, 8)
+                }
+            }
+
+            Spacer()
         }
-        // Menu/back on the remote closes the menu (Resume) instead of exiting.
-        .onExitCommand { showOverlay = false }
+        // First Menu press collapses More Options (if open); the next one
+        // closes the whole bar — handled by onMenu in the .streaming case.
+        .onExitCommand {
+            if showMoreOptions {
+                showMoreOptions = false
+            } else {
+                showOverlay = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func topBarPill(_ title: String, systemImage: String, active: Bool = false,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .padding(.horizontal, 4)
+        }
+        .buttonStyle(.bordered)
+        // Manually white when "on" (matches SettingsView's OptionRow
+        // convention for a persistent selected state), gray otherwise — tvOS
+        // still auto-inverts to white-on-dark on focus on top of this.
+        .tint(active ? .white : .gray)
+    }
+
+    /// "Back to Menu" / "Performance Overlay" (On/Off) / "Stream Details"
+    /// (placeholder — content still TBD).
+    private var moreOptionsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                showMoreOptions = false
+            } label: {
+                Label("Back to Menu", systemImage: "chevron.left")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .tint(.gray)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("PERFORMANCE OVERLAY")
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.5)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Button("On") { statsOverlayOverride = true }
+                        .buttonStyle(.bordered)
+                        .tint(showStats ? .white : .gray)
+                    Button("Off") { statsOverlayOverride = false }
+                        .buttonStyle(.bordered)
+                        .tint(showStats ? .gray : .white)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 14)
+
+            Button {
+                // Stream Details: intentionally empty for now — content TBD.
+            } label: {
+                Label("Stream Details", systemImage: "chevron.right")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .tint(.gray)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+        }
+        .frame(width: 340)
+        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    /// Standard Steam in-game-overlay hotkey (Shift+Tab): a real key-down for
+    /// Shift, then Tab with the shift modifier bit set, released in reverse
+    /// order — mirrors how a real keyboard combo arrives, unlike just setting
+    /// the modifier bit on a lone Tab event (see VideoSurfaceView's HID→VK
+    /// path and InputSender.sendKeyEvent).
+    private func sendSteamOverlayHotkey() {
+        let shiftHeld: UInt16 = 0x0001
+        controller.inputSender?.sendKeyEvent(down: true, vk: VK.shift, scancode: 0, modifiers: shiftHeld)
+        controller.inputSender?.sendKeyEvent(down: true, vk: VK.tab, scancode: 0, modifiers: shiftHeld)
+        controller.inputSender?.sendKeyEvent(down: false, vk: VK.tab, scancode: 0, modifiers: shiftHeld)
+        controller.inputSender?.sendKeyEvent(down: false, vk: VK.shift, scancode: 0, modifiers: 0)
     }
 
     private func statusView(title: String, message: String) -> some View {
@@ -585,19 +730,7 @@ struct VirtualKeyboardView: View {
 
     @State private var shifted = false
 
-    // Windows Virtual-Key codes.
-    private enum VK {
-        static let back: UInt16 = 0x08
-        static let tab: UInt16 = 0x09
-        static let enter: UInt16 = 0x0D
-        static let shift: UInt16 = 0x10
-        static let escape: UInt16 = 0x1B
-        static let space: UInt16 = 0x20
-        static let left: UInt16 = 0x25
-        static let up: UInt16 = 0x26
-        static let right: UInt16 = 0x27
-        static let down: UInt16 = 0x28
-    }
+    // Uses the file-scope VK enum (Windows Virtual-Key codes) defined above.
 
     private let rows: [[String]] = [
         ["1","2","3","4","5","6","7","8","9","0"],
