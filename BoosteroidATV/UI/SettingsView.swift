@@ -132,7 +132,7 @@ private struct OptionRow<Value: Hashable>: View {
             ForEach(options, id: \.1) { label, value in
                 Button(label) { selection = value }
                     .buttonStyle(.bordered)
-                    .tint(selection == value ? .orange : .gray)
+                    .tint(selection == value ? .white : .gray)
             }
         }
     }
