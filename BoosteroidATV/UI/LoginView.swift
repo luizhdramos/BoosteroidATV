@@ -63,8 +63,14 @@ struct LoginView: View {
             Button("Sign In") {
                 authManager.submitCredentials(email: email, password: password)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.white)
+            // .bordered (not .borderedProminent) + .gray: gives the standard
+            // tvOS look used everywhere else in the app — translucent gray
+            // fill with white text by default, and the system auto-inverts
+            // to a solid white fill with dark text on focus. borderedProminent
+            // keeps a solid fill at all times, so tint(.white) here produced
+            // a white background with white label text — invisible.
+            .buttonStyle(.bordered)
+            .tint(.gray)
             .disabled(email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
         }
         .padding(60)
@@ -106,8 +112,8 @@ struct LoginView: View {
             .frame(maxHeight: 400)
 
             Button("Try Again") { authManager.login() }
-                .buttonStyle(.borderedProminent)
-                .tint(.white)
+                .buttonStyle(.bordered)
+                .tint(.gray)
         }
         .padding(80)
     }

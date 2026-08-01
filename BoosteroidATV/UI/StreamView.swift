@@ -275,8 +275,8 @@ struct StreamView: View {
                     .foregroundStyle(.secondary)
                 HStack(spacing: 24) {
                     Button("Resume") { showOverlay = false }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.white)
+                        .buttonStyle(.bordered)
+                        .tint(.gray)
                     // Typing and pointing are the two things a gamepad can't do
                     // — needed for launchers, logins and in-game search.
                     Button("Keyboard") {
