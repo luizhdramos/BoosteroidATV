@@ -75,28 +75,6 @@ struct StreamView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 60)
 
-                        // Secondary diagnostics, kept small: most of the time
-                        // there's nothing useful here, but some games never
-                        // report a numeric queue position or hit an unusual
-                        // claim response, and this is what surfaces that.
-                        VStack(spacing: 4) {
-                            Text("Status: \(queueStatus.isEmpty ? "waiting" : queueStatus) — waited \(Int(Date().timeIntervalSince(queueStartedAt)))s")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            if !queueDebug.isEmpty {
-                                Text(queueDebug)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if !claimResult.isEmpty {
-                                Text(claimResult)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 60)
-                            }
-                        }
-
                         Button("Cancel") { onDismiss() }
                             .buttonStyle(.bordered)
                             .tint(.gray)
@@ -328,22 +306,22 @@ struct StreamView: View {
         switch currentStageIndex {
         case 0:
             if let queuePosition {
-                return "Posição na fila: \(queuePosition)" + (queueEta.map { " — cerca de \($0)s" } ?? "")
+                return "Queue position: \(queuePosition)" + (queueEta.map { " — ~\($0)s" } ?? "")
             }
-            return "Aguardando na fila…"
+            return "Waiting in queue…"
         case 1:
-            return "Máquina encontrada — confirmando sessão…"
+            return "Machine found — confirming session…"
         default:
             if isPreparingFinished {
-                return "Máquina finalizada — carregando o jogo…"
+                return "Machine ready — loading the game…"
             }
-            return controller.stage.isEmpty ? "Preparando a máquina…" : controller.stage
+            return controller.stage.isEmpty ? "Preparing the machine…" : controller.stage
         }
     }
 
     private var sessionTimeline: some View {
         let index = currentStageIndex
-        let labels = ["Fila", "Máquina Encontrada", isPreparingFinished ? "Máquina Finalizada" : "Preparando Máquina"]
+        let labels = ["Queue", "Machine Found", isPreparingFinished ? "Machine Ready" : "Preparing Machine"]
         return HStack(alignment: .top, spacing: 0) {
             ForEach(labels.indices, id: \.self) { i in
                 timelineNode(label: labels[i], reached: i <= index, active: i == index)
