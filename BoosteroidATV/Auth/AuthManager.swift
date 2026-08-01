@@ -5,12 +5,15 @@ import Observation
 // MARK: - Login Phase
 
 enum LoginPhase: Equatable {
-    case idle
     /// CONFIRMED 2026-07-27/28 (captured the real Android TV app's traffic,
     /// including the required x-nonce-17 header): a direct email/password
     /// form — exactly what that app's own "Sign in Manually" button does
     /// (POST /api/v1/auth/login), no external browser or cookie export
     /// needed. See BoosteroidAuthAPI.login(email:password:).
+    ///
+    /// This is the app's default/initial state — no separate splash or
+    /// "tap to sign in" screen in front of it (design decision: the login
+    /// form itself is the first thing shown, no extra remote click to reveal it).
     case credentialsEntry
     case exchangingTokens
     case failed(String)
@@ -22,7 +25,7 @@ enum LoginPhase: Equatable {
 @MainActor
 final class AuthManager {
     private(set) var session: AuthSession?
-    private(set) var loginPhase: LoginPhase = .idle
+    private(set) var loginPhase: LoginPhase = .credentialsEntry
 
     var isAuthenticated: Bool { session != nil }
 
@@ -45,16 +48,11 @@ final class AuthManager {
 
     // MARK: Login
 
+    /// Resets back to the login form — used by "Try Again" after a failure.
     func login() {
         loginTask?.cancel()
         loginTask = nil
         loginPhase = .credentialsEntry
-    }
-
-    func cancelLogin() {
-        loginTask?.cancel()
-        loginTask = nil
-        loginPhase = .idle
     }
 
     /// Called by LoginView's email/password form — the primary login path.
@@ -75,7 +73,7 @@ final class AuthManager {
                 scheduleProactiveRefresh()
                 scheduleBackgroundRefresh()
                 try persist(newSession)
-                loginPhase = .idle
+                loginPhase = .credentialsEntry
             } catch {
                 loginPhase = .failed(error.localizedDescription)
             }
@@ -87,7 +85,7 @@ final class AuthManager {
     func logout() {
         refreshTimer?.cancel()
         session = nil
-        loginPhase = .idle
+        loginPhase = .credentialsEntry
         KeychainService.delete()
         HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
     }

@@ -160,7 +160,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BoosteroidATV/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = BoosteroidATV;
+				INFOPLIST_KEY_CFBundleDisplayName = BoosteroidTV;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BoosteroidATV uses the microphone for voice chat during cloud gaming sessions.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -197,7 +197,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BoosteroidATV/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = BoosteroidATV;
+				INFOPLIST_KEY_CFBundleDisplayName = BoosteroidTV;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BoosteroidATV uses the microphone for voice chat during cloud gaming sessions.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

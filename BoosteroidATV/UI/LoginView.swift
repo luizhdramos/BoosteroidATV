@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// The app's very first screen — no separate splash/"tap to sign in" screen
+/// in front of it. Design decision: get straight to the email/password form,
+/// no extra remote click needed to reveal it.
 struct LoginView: View {
     @Environment(AuthManager.self) var authManager
     @State private var email: String = ""
@@ -7,10 +10,8 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            BoosteroidTheme.background.ignoresSafeArea()
             switch authManager.loginPhase {
-            case .idle:
-                loginPrompt
             case .credentialsEntry:
                 credentialsEntry
             case .exchangingTokens:
@@ -29,15 +30,18 @@ struct LoginView: View {
     // browser-facing /auth/login page, not this REST endpoint) — exactly
     // what that app's own "Sign in Manually" screen does.
     private var credentialsEntry: some View {
-        VStack(spacing: 32) {
-            VStack(spacing: 8) {
-                Text("Sign in to Boosteroid")
-                    .font(.title.weight(.semibold))
+        VStack(spacing: 28) {
+            HStack(spacing: 10) {
+                Image(systemName: "bolt.fill")
+                    .foregroundStyle(BoosteroidTheme.brandGradient)
+                Text("BoosteroidTV")
                     .foregroundStyle(.white)
-                Text("Same account as the mobile/web app.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
             }
+            .font(.title2.weight(.bold))
+
+            Text("Sign in to Boosteroid")
+                .font(.title3)
+                .foregroundStyle(.secondary)
 
             VStack(spacing: 16) {
                 // .textInputAutocapitalization(.never) matters here: without
@@ -53,51 +57,18 @@ struct LoginView: View {
                 SecureField("Password", text: $password)
                     .textContentType(.password)
             }
-            .frame(maxWidth: 700)
+            .frame(maxWidth: 600)
+            .padding(.top, 8)
 
-            HStack(spacing: 24) {
-                Button("Sign In") {
-                    authManager.submitCredentials(email: email, password: password)
-                }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-                .disabled(email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
-                Button("Cancel") { authManager.cancelLogin() }
-                    .buttonStyle(.bordered)
-                    .tint(.gray)
+            Button("Sign In") {
+                authManager.submitCredentials(email: email, password: password)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(.white)
+            .disabled(email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
         }
-        .padding(80)
-    }
-
-    // MARK: Login Prompt
-
-    private var loginPrompt: some View {
-        VStack(spacing: 48) {
-            VStack(spacing: 12) {
-                Image(systemName: "play.tv.fill")
-                    .font(.system(size: 80))
-                    .foregroundStyle(.white)
-                Text("BoosteroidATV")
-                    .font(.system(size: 52, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("Cloud Gaming for Apple TV")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-
-            Button {
-                authManager.login()
-            } label: {
-                Label("Sign in to Boosteroid", systemImage: "person.badge.key")
-                    .font(.title2.weight(.semibold))
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 16)
-            }
-            .buttonStyle(.bordered)
-            .tint(.orange)
-        }
-        .padding(80)
+        .padding(60)
+        .frame(maxWidth: 760)
     }
 
     // MARK: Exchanging Tokens
@@ -134,14 +105,9 @@ struct LoginView: View {
             }
             .frame(maxHeight: 400)
 
-            HStack(spacing: 24) {
-                Button("Try Again") { authManager.login() }
-                    .buttonStyle(.bordered)
-                    .tint(.orange)
-                Button("Cancel") { authManager.cancelLogin() }
-                    .buttonStyle(.bordered)
-                    .tint(.gray)
-            }
+            Button("Try Again") { authManager.login() }
+                .buttonStyle(.borderedProminent)
+                .tint(.white)
         }
         .padding(80)
     }
