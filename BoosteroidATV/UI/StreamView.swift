@@ -377,18 +377,22 @@ struct StreamView: View {
             .padding(.bottom, 16)
             // Without an explicit width, this HStack (and therefore the
             // background below, which follows its host's size) only sized
-            // itself to fit its content instead of the full screen — which
-            // is why the bar looked like it stopped short of the edges.
+            // itself to fit its content instead of the full screen.
             .frame(maxWidth: .infinity)
-            .background(
-                LinearGradient(
-                    colors: [.black.opacity(0.92), .black.opacity(0.75), .clear],
-                    startPoint: .top, endPoint: .bottom
-                )
-                .frame(height: 170)
-                .ignoresSafeArea(edges: .top),
-                alignment: .top
-            )
+            // Flat opacity instead of a gradient, and no manual height: a
+            // fixed-height gradient that fades to fully clear meant most of
+            // its "170pt" was empty/faded space ABOVE the actual buttons,
+            // not behind them — the row itself sat in the already-faded
+            // part, which is why it still looked transparent, and the fixed
+            // height made the bar read as taller than its actual content.
+            // Backing it with a flat color that hugs this row's own height
+            // fixes both: it's uniformly dark right behind the buttons, and
+            // it's exactly as tall as they are (plus the safe-area strip).
+            // .horizontal here (not just .top) also bleeds it past the
+            // side safe-area insets, which is what was falling short of the
+            // true screen edges — the button row itself stays padded/inset
+            // via the .padding(.horizontal, 32) above.
+            .background(Color.black.opacity(0.85).ignoresSafeArea(edges: [.top, .horizontal]))
 
             if showMoreOptions {
                 HStack(alignment: .top, spacing: 12) {
