@@ -341,8 +341,19 @@ struct StreamView: View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 Button {
-                    controller.disconnect()
-                    onDismiss()
+                    // CONFIRMED 2026-08-02 (see StreamController.terminateSession):
+                    // plain disconnect() only ever tore down THIS device's local
+                    // connection, never the actual cloud session — that's why
+                    // Disconnect used to just bounce back to the menu with the
+                    // game still running server-side. terminateSession() sends
+                    // the real end-session WebSocket message; it must complete
+                    // (and the socket must still be open) BEFORE disconnect()
+                    // tears the control channel down.
+                    Task {
+                        await controller.terminateSession()
+                        controller.disconnect()
+                        onDismiss()
+                    }
                 } label: {
                     Label("Disconnect", systemImage: "xmark.circle")
                 }

@@ -306,6 +306,31 @@ final class StreamController: NSObject {
         }
     }
 
+    /// CONFIRMED 2026-08-02 by live-capturing the real web client's own
+    /// outgoing WebSocket frames while ending a session via its "End
+    /// Session" → "Terminate Session" → "END SESSION" UI flow (patched
+    /// `WebSocket.prototype.send` retroactively on the already-open control
+    /// socket — see BoosteroidClient.stopSession's corrected note): ending a
+    /// session for real sends `{"type":"settings","action":"terminating"}`
+    /// (no other fields) over THIS SAME control WebSocket used for input,
+    /// sent TWICE in the observed capture, immediately before the client's
+    /// own "session ended" confirmation screen appeared. This is neither a
+    /// REST call nor the account-wide realtime/queue socket
+    /// (BoosteroidRealtimeClient) — both prior guesses were wrong.
+    ///
+    /// Must be called (and awaited) BEFORE disconnect(), since disconnect()
+    /// flips the control channel's `isOpen` to false and send() no-ops once
+    /// that happens. Only call this for an explicit user-initiated "end the
+    /// session" action (the Disconnect button) — plain disconnect() alone
+    /// should keep being used anywhere that just wants to drop THIS
+    /// device's local connection while leaving the cloud session running
+    /// (see the .onDisappear note in StreamView for why Back's natural
+    /// dismiss-to-Home deliberately does NOT call this).
+    func terminateSession() async {
+        await controlChannel.send(type: "settings", action: "terminating")
+        await controlChannel.send(type: "settings", action: "terminating")
+    }
+
     func disconnect() {
         statsTask?.cancel()
         statsTask = nil

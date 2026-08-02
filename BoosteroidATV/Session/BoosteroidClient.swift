@@ -689,17 +689,27 @@ actor BoosteroidClient {
         return [ActiveSessionInfo(sessionId: dto.data.sessionId, status: dto.data.status, gameId: String(dto.data.appId))]
     }
 
-    /// TODO(protocol): no teardown REST call was observed when ending a real
-    /// session via the UI's "End Session" → "End session" confirm flow — this
-    /// time checked at the CDP network-request level (not just page-script
-    /// patches, which are known-unreliable here — see BoosteroidRealtimeClient),
-    /// so its absence is a stronger signal: teardown most likely goes out over
-    /// the same WebSocket used for queue-position push. Note also that
-    /// last-session did NOT immediately reflect the ended state (still showed
-    /// "LI" right after confirming "End Session") — don't rely on it to
-    /// detect that a session you ended yourself has actually stopped.
+    /// CONFIRMED 2026-08-02: no teardown REST call exists — this method
+    /// remains an intentional stub. An earlier pass (checked at the CDP
+    /// network-request level, not just page-script patches) found zero
+    /// matching REST calls and guessed the teardown message rides the
+    /// account-wide queue-position WebSocket (BoosteroidRealtimeClient)
+    /// instead — that guess was WRONG. A live capture (patching
+    /// `WebSocket.prototype.send` retroactively on an already-open socket
+    /// while actually ending a session via the UI) found the real message —
+    /// `{"type":"settings","action":"terminating"}`, sent twice — goes out
+    /// over the PER-SESSION control WebSocket used for input during an
+    /// active stream, not this account-wide one. See
+    /// StreamController.terminateSession(), which is the real, implemented
+    /// equivalent of this method — called from StreamView's Disconnect
+    /// button. This REST stub is kept only as a documented dead end so a
+    /// future pass doesn't waste time re-deriving the same (correct)
+    /// negative result. Note also that last-session did NOT immediately
+    /// reflect the ended state (still showed "LI" right after confirming
+    /// "End Session") — don't rely on it to detect that a session you ended
+    /// yourself has actually stopped.
     func stopSession(sessionId: String, cookies: [String: String]) async throws {
-        throw BoosteroidClientError.notImplemented("stopSession — no REST teardown call found; likely goes out over the WebSocket used for queue updates (see BoosteroidRealtimeClient) — unconfirmed message shape")
+        throw BoosteroidClientError.notImplemented("stopSession — no REST teardown call exists; the real mechanism is StreamController.terminateSession() sending {\"type\":\"settings\",\"action\":\"terminating\"} over BoosteroidControlChannel")
     }
 }
 
