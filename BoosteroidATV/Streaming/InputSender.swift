@@ -62,6 +62,23 @@ final class InputSender: InputEventHandler {
     /// nil means we're running on the provisional (index) id — input still
     /// flows, this just tells us whether the server handshake completed.
     private(set) var lastServerAckId: String?
+    /// DIAGNOSTIC ONLY (added 2026-08-09): counts every time GameController's
+    /// OWN buttonMenu.valueChangedHandler fires, completely independent of
+    /// both pollGamepad's read of buttonMenu.isPressed AND
+    /// VideoSurfaceView's pressesBegan/.menu UIPress handling. Two guesses
+    /// about whether/how this button reaches us in a row have turned out
+    /// wrong on real hardware (b509aef, then its revert) — this exists so
+    /// the NEXT attempt is based on what actually happens on a real device
+    /// instead of a third guess. Surfaced in the Performance Overlay as
+    /// "MenuBtn". If this stays at 0 no matter how many times Start/Select
+    /// is pressed, GameController's handler-based API for this button is
+    /// genuinely dead in this input mode, full stop — no amount of
+    /// poll-vs-UIPress rearranging will fix it, and the only way to reach
+    /// the game from that button might be entirely UIPress-driven (which
+    /// still failed once already — see b509aef's revert — so THAT would
+    /// need its own real bug fix, not just resurrecting it as-is).
+    private(set) var menuButtonHandlerFireCount = 0
+    private(set) var menuButtonHandlerLastPressed = false
 
     // Per-controller server-assigned ids (CONFIRMED required before the
     // server accepts button/axes/pad events for that controller — see
@@ -251,6 +268,17 @@ final class InputSender: InputEventHandler {
         // controllerIds[key] to the server's id (see there).
         controllerIds[key] = index
         connectedControllerCount = GCController.controllers().count
+
+        // DIAGNOSTIC ONLY — see menuButtonHandlerFireCount's doc comment.
+        // GCController's handlerQueue defaults to the main queue, but hop
+        // explicitly anyway since that default is easy to get wrong; this
+        // class is @MainActor and every other mutation assumes it.
+        controller.extendedGamepad?.buttonMenu.valueChangedHandler = { [weak self] _, _, pressed in
+            DispatchQueue.main.async {
+                self?.menuButtonHandlerFireCount += 1
+                self?.menuButtonHandlerLastPressed = pressed
+            }
+        }
 
         Task { [controlChannel] in await controlChannel.send(type: "controller", action: "connected", fields: ["name": name]) }
     }
