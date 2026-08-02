@@ -59,24 +59,48 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
 
-                    VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 16) {
                         Text("Preferred server location")
-                        Text("This setting takes effect the next time a game is started.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-                            regionButton("Automatic Location", isSelected: viewModel.preferredPlaygroundId == nil) {
+                        Spacer()
+                        // A grid of ~24 buttons (one per playground) was
+                        // unreadable — per feedback, a dropdown Menu (like
+                        // the real account-settings page's own select)
+                        // scales to any number of locations without eating
+                        // half the screen. SwiftUI's Menu renders as a
+                        // proper tvOS popover (unlike Picker's pushed
+                        // destination, which the OptionRow doc comment
+                        // above notes renders blank here), so this is safe
+                        // where Picker wasn't.
+                        Menu {
+                            Button {
                                 Task { await viewModel.setPreferredPlayground(nil, authManager: authManager) }
-                            }
-                            ForEach(viewModel.playgrounds) { playground in
-                                regionButton(playground.displayName, isSelected: viewModel.preferredPlaygroundId == playground.id) {
-                                    Task { await viewModel.setPreferredPlayground(playground.id, authManager: authManager) }
+                            } label: {
+                                if viewModel.preferredPlaygroundId == nil {
+                                    Label("Automatic Location", systemImage: "checkmark")
+                                } else {
+                                    Text("Automatic Location")
                                 }
                             }
+                            ForEach(viewModel.playgrounds) { playground in
+                                Button {
+                                    Task { await viewModel.setPreferredPlayground(playground.id, authManager: authManager) }
+                                } label: {
+                                    if viewModel.preferredPlaygroundId == playground.id {
+                                        Label(playground.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(playground.displayName)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label(selectedPlaygroundLabel, systemImage: "chevron.up.chevron.down")
                         }
+                        .buttonStyle(.bordered)
+                        .tint(.gray)
                     }
-                    .padding(.top, 4)
+                    Text("This setting takes effect the next time a game is started.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 section("Account") {
                     Button("Sign Out") { authManager.logout() }
@@ -106,15 +130,11 @@ struct SettingsView: View {
         )
     }
 
-    /// One tile in the "Preferred server location" grid — same bordered-
-    /// button-with-tint selection pattern as OptionRow, just laid out in a
-    /// LazyVGrid instead of a single row since there are ~24 locations
-    /// (too many to fit one line, unlike Resolution/FPS).
-    @ViewBuilder
-    private func regionButton(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.bordered)
-            .tint(isSelected ? .white : .gray)
+    /// The Menu button's own label — the currently selected location's name,
+    /// or "Automatic Location" while `preferredPlaygroundId` is nil.
+    private var selectedPlaygroundLabel: String {
+        guard let id = viewModel.preferredPlaygroundId else { return "Automatic Location" }
+        return viewModel.playgrounds.first(where: { $0.id == id })?.displayName ?? "Automatic Location"
     }
 
     /// One titled settings group: a bright header over its rows on a subtle
