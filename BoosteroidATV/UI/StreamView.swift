@@ -375,10 +375,18 @@ struct StreamView: View {
             .padding(.horizontal, 32)
             .padding(.top, 24)
             .padding(.bottom, 16)
+            // Without an explicit width, this HStack (and therefore the
+            // background below, which follows its host's size) only sized
+            // itself to fit its content instead of the full screen — which
+            // is why the bar looked like it stopped short of the edges.
+            .frame(maxWidth: .infinity)
             .background(
-                LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 160)
-                    .ignoresSafeArea(edges: .top),
+                LinearGradient(
+                    colors: [.black.opacity(0.92), .black.opacity(0.75), .clear],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .frame(height: 170)
+                .ignoresSafeArea(edges: .top),
                 alignment: .top
             )
 
@@ -420,6 +428,14 @@ struct StreamView: View {
         .tint(active ? .white : .gray)
     }
 
+    /// A smaller, fixed font for the More Options / flyout rows — the
+    /// system's default tvOS button text is large enough that, combined
+    /// with an icon and a chevron, "Performance Overlay" wrapped down to one
+    /// character per line inside the panel's width. Sizing text explicitly
+    /// (rather than relying on the default) keeps these compact HUD rows on
+    /// one line.
+    private static let panelRowFont: Font = .system(size: 24, weight: .medium)
+
     /// "Back to Menu" / "Performance Overlay" (opens its own Enable/Disable
     /// flyout to the left — see performanceOverlayFlyout) / "Stream Details"
     /// (placeholder — content still TBD).
@@ -434,6 +450,7 @@ struct StreamView: View {
                 onDismiss()
             } label: {
                 Label("Back to Menu", systemImage: "chevron.left")
+                    .font(Self.panelRowFont)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.bordered)
@@ -453,6 +470,8 @@ struct StreamView: View {
                     Spacer()
                     Image(systemName: "chevron.right").foregroundStyle(.secondary)
                 }
+                .font(Self.panelRowFont)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.bordered)
             .tint(showPerformanceFlyout ? .white : .gray)
@@ -463,6 +482,7 @@ struct StreamView: View {
                 // Stream Details: intentionally empty for now — content TBD.
             } label: {
                 Label("Stream Details", systemImage: "chart.bar")
+                    .font(Self.panelRowFont)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.bordered)
@@ -470,8 +490,8 @@ struct StreamView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
         }
-        .frame(width: 340)
-        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
+        .frame(width: 420)
+        .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 16))
     }
 
     /// The Performance Overlay row's own nested submenu (Enable/Disable),
@@ -483,8 +503,8 @@ struct StreamView: View {
             performanceFlyoutRow("Disable", selected: !showStats) { statsOverlayOverride = false }
         }
         .padding(.vertical, 8)
-        .frame(width: 220)
-        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
+        .frame(width: 260)
+        .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 16))
     }
 
     @ViewBuilder
@@ -496,6 +516,7 @@ struct StreamView: View {
                 }
                 Text(title)
             }
+            .font(Self.panelRowFont)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.bordered)
@@ -837,20 +858,23 @@ struct VirtualKeyboardView: View {
 
     // Full QWERTY layout (numbers/punctuation included, real key placement)
     // per the reference design, rather than the old letters-only + a
-    // separate function-key row.
+    // separate function-key row. Sized down considerably from the first
+    // pass (52pt keys, tighter spacing, explicit small font) — the default
+    // tvOS button size/font made every key noticeably larger than the
+    // reference image.
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
                 keyButton("`") { send(vk: VK.backtick) }
                 ForEach(topRow, id: \.self) { key in
                     keyButton(key) { send(vk: UInt16(key.unicodeScalars.first!.value)) }
                 }
                 keyButton("-") { send(vk: VK.minus) }
                 keyButton("=") { send(vk: VK.equals) }
-                keyButton("Backspace", width: 130, tint: .red) { send(vk: VK.back) }
+                keyButton("Backspace", width: 100, tint: .red) { send(vk: VK.back) }
             }
-            HStack(spacing: 8) {
-                keyButton("Tab", width: 90) { send(vk: VK.tab) }
+            HStack(spacing: 6) {
+                keyButton("Tab", width: 72) { send(vk: VK.tab) }
                 ForEach(qwertyRow, id: \.self) { key in
                     keyButton(shifted ? key : key.lowercased()) {
                         send(vk: UInt16(key.unicodeScalars.first!.value))
@@ -860,7 +884,7 @@ struct VirtualKeyboardView: View {
                 keyButton("]") { send(vk: VK.rightBracket) }
                 keyButton("\\") { send(vk: VK.backslash) }
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach(homeRow, id: \.self) { key in
                     keyButton(shifted ? key : key.lowercased()) {
                         send(vk: UInt16(key.unicodeScalars.first!.value))
@@ -868,10 +892,10 @@ struct VirtualKeyboardView: View {
                 }
                 keyButton(";") { send(vk: VK.semicolon) }
                 keyButton("'") { send(vk: VK.quote) }
-                keyButton("Enter", width: 130) { send(vk: VK.enter) }
+                keyButton("Enter", width: 100) { send(vk: VK.enter) }
             }
-            HStack(spacing: 8) {
-                keyButton(shifted ? "Shift ON" : "Shift", width: 110) { shifted.toggle() }
+            HStack(spacing: 6) {
+                keyButton(shifted ? "Shift ON" : "Shift", width: 88) { shifted.toggle() }
                 ForEach(bottomRow, id: \.self) { key in
                     keyButton(shifted ? key : key.lowercased()) {
                         send(vk: UInt16(key.unicodeScalars.first!.value))
@@ -881,25 +905,35 @@ struct VirtualKeyboardView: View {
                 keyButton(".") { send(vk: VK.period) }
                 keyButton("/") { send(vk: VK.slash) }
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 keyButton("Esc") { send(vk: VK.escape) }
-                keyButton("Space", width: 340) { send(vk: VK.space) }
+                keyButton("Space", width: 260) { send(vk: VK.space) }
                 keyButton("←") { send(vk: VK.left) }
                 keyButton("↑") { send(vk: VK.up) }
                 keyButton("↓") { send(vk: VK.down) }
                 keyButton("→") { send(vk: VK.right) }
-                keyButton("Close", width: 90, tint: .red) { onClose() }
+                keyButton("Close", width: 72, tint: .red) { onClose() }
             }
         }
+        .padding(16)
+        // Restored an opaque enclosing panel: each key's own .bordered fill
+        // is translucent by design (so it can invert on focus), which read
+        // as "too transparent" sitting directly over bright game content.
+        // Sitting on a solid dark backdrop instead makes the same keys read
+        // as solid/legible, matching the reference image.
+        .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 20))
     }
 
     @ViewBuilder
-    private func keyButton(_ label: String, width: CGFloat = 64, tint: Color = .gray,
+    private func keyButton(_ label: String, width: CGFloat = 52, tint: Color = .gray,
                            action: @escaping () -> Void) -> some View {
-        Button(label, action: action)
-            .buttonStyle(.bordered)
-            .tint(tint)
-            .frame(minWidth: width)
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 18, weight: .medium))
+        }
+        .buttonStyle(.bordered)
+        .tint(tint)
+        .frame(minWidth: width, minHeight: 40)
     }
 
     /// Tap = press and release. `shifted` is reported as the modifier bit the
