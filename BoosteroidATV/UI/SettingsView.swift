@@ -45,9 +45,31 @@ struct SettingsView: View {
                     )
                     Toggle("Controller rumble", isOn: $viewModel.streamSettings.rumbleEnabled)
                     if viewModel.streamSettings.rumbleEnabled {
-                        OptionRow(title: "Rumble intensity",
-                                  options: RumbleIntensity.allCases.map { ($0.displayName, $0) },
-                                  selection: $viewModel.streamSettings.rumbleIntensity)
+                        HStack(spacing: 16) {
+                            Text("Rumble intensity")
+                            Spacer()
+                            // Menu dropdown, same reasoning as the region
+                            // picker below: a row of buttons per option
+                            // reads worse than a single dropdown once
+                            // there's more than a couple of choices.
+                            Menu {
+                                ForEach(RumbleIntensity.allCases, id: \.self) { intensity in
+                                    Button {
+                                        viewModel.streamSettings.rumbleIntensity = intensity
+                                    } label: {
+                                        if viewModel.streamSettings.rumbleIntensity == intensity {
+                                            Label(intensity.displayName, systemImage: "checkmark")
+                                        } else {
+                                            Text(intensity.displayName)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label(viewModel.streamSettings.rumbleIntensity.displayName, systemImage: "chevron.up.chevron.down")
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.gray)
+                        }
                     }
                     Text("Takes effect the next time a game is started.")
                         .font(.caption)
