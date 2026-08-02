@@ -56,8 +56,64 @@ nonisolated struct BoosteroidUserResponseDTO: Codable {
         let name: String
         let email: String?
         let avatar: String?
+        /// CONFIRMED 2026-08-02 live from cloud.boosteroid.com/profile/
+        /// account/main (patched fetch/XHR while toggling the real
+        /// "Permitir ligação a regiões distantes" switch and reading the
+        /// PATCH body back): `false` means the toggle is ON (distant
+        /// regions ALLOWED), `true` means it's OFF (restricted to the
+        /// account's own region) — inverted vs. the UI label, so callers
+        /// should read/write `!onlyMyRegion` as "allow distant regions".
+        /// Optional since older/unrelated call sites decoding this same DTO
+        /// (login) don't need it and it's harmless if ever absent.
+        let onlyMyRegion: Bool?
+        /// CONFIRMED 2026-08-02 live: array of BoosteroidPlayground `id`s
+        /// the account wants to force streaming to; empty means
+        /// "Localização automática". The real web UI only ever puts a
+        /// single id in here despite the array shape — CONFIRMED by
+        /// picking a server from the dropdown and reading the PATCH body
+        /// (`{"preferredPlaygrounds":[6]}`), never more than one entry.
+        let preferredPlaygrounds: [Int]?
     }
     let data: Payload
+}
+
+// MARK: - Streaming Playgrounds (server locations)
+//
+// CONFIRMED 2026-08-02 live: `GET /api/v1/streaming/playgrounds` is the data
+// behind the account-settings page's "Localização de servidor preferida"
+// dropdown — 23 entries observed. Each is a named city/country location with
+// one or more physical gateway hosts; `priority: true` marks the
+// playground(s) considered "the account's own region" (what "Localização
+// automática" uses). This is a DIFFERENT, richer endpoint than the existing
+// `/v1/streaming/gateways` used by `preferredGateway(cookies:)` below — that
+// one is a flat host list with no location metadata, kept only for its
+// original narrow purpose (see its own doc comment).
+nonisolated struct BoosteroidPlayground: Codable, Identifiable, Equatable {
+    struct Location: Codable, Equatable {
+        let country: String
+        let city: String
+    }
+    struct Gateway: Codable, Equatable {
+        let name: String
+        let address: String
+        let active: Bool
+        let status: String
+    }
+    let id: Int
+    let title: String
+    let location: Location
+    let priority: Bool
+    let active: Bool
+    let status: String
+    let gateways: [Gateway]
+
+    /// "Bratislava (Slovakia)" — matches the real web UI's own label text
+    /// exactly (confirmed against the live dropdown).
+    var displayName: String { "\(title) (\(location.country))" }
+}
+
+nonisolated struct BoosteroidPlaygroundsDTO: Codable {
+    let data: [BoosteroidPlayground]
 }
 
 // MARK: - Session Info

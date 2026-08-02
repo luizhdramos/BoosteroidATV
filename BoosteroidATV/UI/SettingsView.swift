@@ -47,6 +47,37 @@ struct SettingsView: View {
                 section("Overlay") {
                     Toggle("Performance overlay", isOn: $viewModel.streamSettings.showStatsOverlay)
                 }
+                section("Region") {
+                    Toggle("Allow connection to distant regions", isOn: allowDistantRegionsBinding)
+                    Text("When searching for available virtual machines, gain access to more VMs, but may experience disruptions or increased latency.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let regionSettingsError = viewModel.regionSettingsError {
+                        Text(regionSettingsError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Preferred server location")
+                        Text("This setting takes effect the next time a game is started.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                            regionButton("Automatic Location", isSelected: viewModel.preferredPlaygroundId == nil) {
+                                Task { await viewModel.setPreferredPlayground(nil, authManager: authManager) }
+                            }
+                            ForEach(viewModel.playgrounds) { playground in
+                                regionButton(playground.displayName, isSelected: viewModel.preferredPlaygroundId == playground.id) {
+                                    Task { await viewModel.setPreferredPlayground(playground.id, authManager: authManager) }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
                 section("Account") {
                     Button("Sign Out") { authManager.logout() }
                         .buttonStyle(.bordered)
@@ -58,6 +89,32 @@ struct SettingsView: View {
             .padding(.horizontal, 60)
             .padding(.vertical, 24)
         }
+    }
+
+    /// Mirrors cloud.boosteroid.com/profile/account/main's "Permitir ligação
+    /// a regiões distantes" toggle (see GamesViewModel.setAllowDistantRegions
+    /// / BoosteroidClient's Streaming Regions section for the confirmed
+    /// PATCH this drives). The write is async and server-side, so this is a
+    /// custom Binding rather than a plain `$viewModel.foo` — the setter fires
+    /// a Task instead of writing synchronously.
+    private var allowDistantRegionsBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.allowDistantRegions },
+            set: { newValue in
+                Task { await viewModel.setAllowDistantRegions(newValue, authManager: authManager) }
+            }
+        )
+    }
+
+    /// One tile in the "Preferred server location" grid — same bordered-
+    /// button-with-tint selection pattern as OptionRow, just laid out in a
+    /// LazyVGrid instead of a single row since there are ~24 locations
+    /// (too many to fit one line, unlike Resolution/FPS).
+    @ViewBuilder
+    private func regionButton(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .tint(isSelected ? .white : .gray)
     }
 
     /// One titled settings group: a bright header over its rows on a subtle

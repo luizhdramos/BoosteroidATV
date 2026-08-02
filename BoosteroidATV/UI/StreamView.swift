@@ -84,6 +84,12 @@ struct StreamView: View {
     /// One shared client so the queues/start token can redirect the readiness
     /// polling that start() is already running (see setPreferredSessionId).
     @State private var client = BoosteroidClient()
+    /// The friendly name (e.g. "Bratislava (Slovakia)") of the server this
+    /// session actually landed on, resolved via GamesViewModel.
+    /// playgroundName(forGatewayHost:) the moment the real gateway host is
+    /// known (see start()) — nil until then, or if it can't be matched
+    /// against the account's playgrounds list.
+    @State private var connectedServerName: String?
 
     var body: some View {
         ZStack {
@@ -112,6 +118,17 @@ struct StreamView: View {
                             .foregroundStyle(.white.opacity(0.85))
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 60)
+
+                        // Which physical server the session actually landed
+                        // on — only known once resolvedSession.nodeBaseUrl is
+                        // set in start() (right before controller.connect()),
+                        // so this stays hidden through the Queue/Machine
+                        // Found stages and appears once machine setup starts.
+                        if let connectedServerName {
+                            Text("Server: \(connectedServerName)")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
 
                         Button("Cancel") { onDismiss() }
                             .buttonStyle(.bordered)
@@ -298,6 +315,7 @@ struct StreamView: View {
     private var statsOverlay: some View {
         let mbps = Double(controller.stats.bitrateKbps) / 1000
         var line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps | Stream FPS: \(controller.streamFps) | Latency: \(controller.rttMs)ms"
+        if let connectedServerName { line += " | Server: \(connectedServerName)" }
         // Video and input ride entirely separate connections — the control
         // channel can silently die (network blip, server timeout) while video
         // keeps playing perfectly, leaving mouse/keyboard/controller dead with
@@ -614,6 +632,9 @@ struct StreamView: View {
             var resolvedSession = session
             if let claimedGateway {
                 resolvedSession.nodeBaseUrl = claimedGateway
+            }
+            if let nodeBaseUrl = resolvedSession.nodeBaseUrl {
+                connectedServerName = gamesViewModel.playgroundName(forGatewayHost: nodeBaseUrl)
             }
             await controller.connect(session: resolvedSession, settings: settings, cookies: cookies)
         } catch {

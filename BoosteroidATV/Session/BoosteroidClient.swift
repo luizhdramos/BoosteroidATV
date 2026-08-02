@@ -128,6 +128,76 @@ actor BoosteroidClient {
         return AuthUser(userId: String(dto.data.id), displayName: dto.data.name, email: dto.data.email, avatarUrl: dto.data.avatar, membershipTier: "unknown")
     }
 
+    // MARK: Streaming Regions
+    //
+    // CONFIRMED 2026-08-02 by live-capturing cloud.boosteroid.com/profile/
+    // account/main (patched `window.fetch`/`XMLHttpRequest.prototype.send`,
+    // then actually toggling "Permitir ligação a regiões distantes" and
+    // picking a server from "Localização de servidor preferida" in the real
+    // UI): both are plain account-level preferences, read back from the same
+    // GET /api/v1/user this client already calls in fetchCurrentUser, and
+    // written via two small, separate PATCH endpoints. There is no "apply to
+    // this session" step or extra param on enqueue — the preference is read
+    // server-side whenever a session is next created, so writing it here via
+    // the account API is the whole job; nothing else in the queue/session
+    // flow needs to change.
+
+    /// `GET /api/v1/streaming/playgrounds` — CONFIRMED live, see
+    /// BoosteroidPlayground's doc comment for the full shape/evidence.
+    func fetchPlaygrounds(cookies: [String: String]) async throws -> [BoosteroidPlayground] {
+        let url = URL(string: "\(apiBase)/v1/streaming/playgrounds")!
+        let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw BoosteroidClientError.requestFailed("fetchPlaygrounds", String(data: data, encoding: .utf8) ?? "")
+        }
+        return try JSONDecoder().decode(BoosteroidPlaygroundsDTO.self, from: data).data
+    }
+
+    /// Reads the two region preferences off the same `GET /api/v1/user` body
+    /// fetchCurrentUser already decodes. A second network call is unavoidable
+    /// since AuthUser (fetchCurrentUser's return type) doesn't carry these
+    /// fields, but this is only called once when Settings appears.
+    func fetchRegionPreference(cookies: [String: String]) async throws -> (allowDistantRegions: Bool, preferredPlaygroundId: Int?) {
+        let url = URL(string: "\(apiBase)/v1/user")!
+        let (data, response) = try await session.data(for: authenticatedRequest(url, cookies: cookies))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw BoosteroidClientError.requestFailed("fetchRegionPreference", String(data: data, encoding: .utf8) ?? "")
+        }
+        let dto = try JSONDecoder().decode(BoosteroidUserResponseDTO.self, from: data)
+        let onlyMyRegion = dto.data.onlyMyRegion ?? false
+        return (allowDistantRegions: !onlyMyRegion, preferredPlaygroundId: dto.data.preferredPlaygrounds?.first)
+    }
+
+    /// `PATCH /api/v1/user/update/streaming-regions` — CONFIRMED body shape
+    /// `{"onlyMyRegion": Bool}` (inverted vs. this method's `allow` parameter
+    /// — see BoosteroidUserResponseDTO.Payload.onlyMyRegion's doc comment).
+    func setAllowDistantRegions(_ allow: Bool, cookies: [String: String]) async throws {
+        let url = URL(string: "\(apiBase)/v1/user/update/streaming-regions")!
+        var req = authenticatedRequest(url, cookies: cookies, method: "PATCH")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["onlyMyRegion": !allow])
+        let (data, response) = try await session.data(for: req)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw BoosteroidClientError.requestFailed("setAllowDistantRegions", String(data: data, encoding: .utf8) ?? "")
+        }
+    }
+
+    /// `PATCH /api/v1/user/update/preferred-playgrounds` — CONFIRMED body
+    /// shape `{"preferredPlaygrounds": [Int]}`; an empty array means
+    /// "Localização automática". CONFIRMED live that the real UI only ever
+    /// sends zero or one id despite the array shape — mirrored here by
+    /// taking a single optional id rather than a list.
+    func setPreferredPlayground(_ id: Int?, cookies: [String: String]) async throws {
+        let url = URL(string: "\(apiBase)/v1/user/update/preferred-playgrounds")!
+        var req = authenticatedRequest(url, cookies: cookies, method: "PATCH")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["preferredPlaygrounds": id.map { [$0] } ?? []])
+        let (data, response) = try await session.data(for: req)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw BoosteroidClientError.requestFailed("setPreferredPlayground", String(data: data, encoding: .utf8) ?? "")
+        }
+    }
+
     // MARK: Session Lifecycle
     //
     // CONFIRMED flow, real endpoints/bodies, END TO END — this was verified
