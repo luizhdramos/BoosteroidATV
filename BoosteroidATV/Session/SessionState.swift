@@ -19,12 +19,89 @@ nonisolated struct StreamSettings: Codable, Equatable {
     /// Show the in-stream performance overlay (Stream/Decode FPS, latency,
     /// codec & bitrate). Off by default; toggled in Settings.
     var showStatsOverlay: Bool = false
+    /// Whether controller rumble is applied at all. Off means every
+    /// server rumble event is simply dropped before it reaches
+    /// InputSender's haptics rig — see StreamController.connect, which
+    /// forwards this onto InputSender.rumbleEnabled at connect time.
+    var rumbleEnabled: Bool = true
+    /// Overall rumble intensity, applied on top of whatever left/right the
+    /// server sends — see RumbleIntensity.multiplier.
+    var rumbleIntensity: RumbleIntensity = .automatic
+
+    init() {}
+
+    // CUSTOM Codable conformance (added 2026-08-09 alongside rumbleEnabled/
+    // rumbleIntensity): this struct is persisted as raw JSON in UserDefaults
+    // (see GamesViewModel.init's `JSONDecoder().decode(StreamSettings.self,
+    // from:)`). The compiler-synthesized Decodable would require EVERY key
+    // to be present, so any user who already has a saved StreamSettings blob
+    // from before these two fields existed would fail to decode entirely —
+    // silently resetting resolution/fps/bitrate/deadzone/etc. back to
+    // defaults too, not just the two new fields. decodeIfPresent with a
+    // fallback keeps old saved settings intact and future field additions
+    // safe by the same pattern.
+    private enum CodingKeys: String, CodingKey {
+        case resolution, fps, maxBitrateKbps, codec, micEnabled
+        case automaticBitrate, manualBitrateMbps, controllerDeadzone
+        case showStatsOverlay, rumbleEnabled, rumbleIntensity
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        resolution = try container.decodeIfPresent(String.self, forKey: .resolution) ?? "1920x1080"
+        fps = try container.decodeIfPresent(Int.self, forKey: .fps) ?? 60
+        maxBitrateKbps = try container.decodeIfPresent(Int.self, forKey: .maxBitrateKbps) ?? 20_000
+        codec = try container.decodeIfPresent(VideoCodec.self, forKey: .codec) ?? .h264
+        micEnabled = try container.decodeIfPresent(Bool.self, forKey: .micEnabled) ?? false
+        automaticBitrate = try container.decodeIfPresent(Bool.self, forKey: .automaticBitrate) ?? true
+        manualBitrateMbps = try container.decodeIfPresent(Int.self, forKey: .manualBitrateMbps) ?? 20
+        controllerDeadzone = try container.decodeIfPresent(Double.self, forKey: .controllerDeadzone) ?? 0.15
+        showStatsOverlay = try container.decodeIfPresent(Bool.self, forKey: .showStatsOverlay) ?? false
+        rumbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .rumbleEnabled) ?? true
+        rumbleIntensity = try container.decodeIfPresent(RumbleIntensity.self, forKey: .rumbleIntensity) ?? .automatic
+    }
 }
 
 nonisolated enum VideoCodec: String, Codable, CaseIterable {
     case h264 = "H264"
     case h265 = "H265"
     case av1  = "AV1"
+}
+
+/// User-facing rumble strength preset (Settings > Controller). Confirmed
+/// working end to end on a real Nintendo Switch Pro Controller — see
+/// InputSender's HapticChannel/applyRumble for where this is consumed.
+nonisolated enum RumbleIntensity: String, Codable, CaseIterable, Hashable {
+    case automatic, weak, medium, strong, veryStrong
+
+    var displayName: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .weak: return "Weak"
+        case .medium: return "Medium"
+        case .strong: return "Strong"
+        case .veryStrong: return "Very Strong"
+        }
+    }
+
+    /// Multiplier applied to the server's raw left/right rumble values
+    /// (each 0...1) before they reach CoreHaptics; the result is clamped
+    /// back to 0...1 by the caller. `.automatic` and `.strong` are both
+    /// 1.0 (the game's value, unmodified) — `.automatic` is the default
+    /// that just trusts the game, `.strong` is the same numeric result
+    /// but an explicit choice (e.g. after trying Weak/Medium and deciding
+    /// to go back to full strength). `.veryStrong` boosts everything
+    /// above what the game sends, which is useful on controllers whose
+    /// motors are already on the weak side.
+    var multiplier: Double {
+        switch self {
+        case .automatic: return 1.0
+        case .weak: return 0.4
+        case .medium: return 0.7
+        case .strong: return 1.0
+        case .veryStrong: return 1.4
+        }
+    }
 }
 
 // MARK: - ICE Server

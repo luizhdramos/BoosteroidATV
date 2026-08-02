@@ -189,6 +189,8 @@ final class StreamController: NSObject {
         //    this device and is what the server gates media on.
         let (width, height) = Self.parseResolution(settings.resolution)
         let sender = InputSender(controlChannel: controlChannel, surfaceWidth: width, surfaceHeight: height)
+        sender.rumbleEnabled = settings.rumbleEnabled
+        sender.rumbleIntensityMultiplier = settings.rumbleIntensity.multiplier
         inputSender = sender
         videoView?.inputHandler = sender
 

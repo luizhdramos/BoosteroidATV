@@ -101,6 +101,16 @@ final class InputSender: InputEventHandler {
     /// the actual fix (rebuild the pattern with the intensity baked in
     /// statically instead of relying on live parameter modulation).
     private(set) var rumbleSendError: String?
+    /// User-configurable overall rumble toggle + intensity (Settings >
+    /// Controller > Rumble / Rumble intensity), set once by StreamController.
+    /// connect from the active StreamSettings. Applied on top of whatever
+    /// left/right the server sends, right before the value reaches
+    /// CoreHaptics — rumbleLastLeft/rumbleLastRight above still reflect the
+    /// RAW server values regardless of this, so they stay useful for
+    /// debugging "is the server actually sending rumble" independent of the
+    /// user's own intensity preference.
+    var rumbleEnabled: Bool = true
+    var rumbleIntensityMultiplier: Double = 1.0
 
     // Per-controller server-assigned ids (CONFIRMED required before the
     // server accepts button/axes/pad events for that controller — see
@@ -564,7 +574,14 @@ final class InputSender: InputEventHandler {
     /// nonzero rumble rather than at connect time — most sessions never
     /// rumble at all, and CHHapticEngine has real overhead not worth paying
     /// up front for every connected controller.
-    private func applyRumble(id: String, left: Double, right: Double) {
+    private func applyRumble(id: String, left rawLeft: Double, right rawRight: Double) {
+        // User's own toggle/intensity preference applied here, right before
+        // CoreHaptics — NOT at the diagnostic-capture site in handleIncoming,
+        // so rumbleLastLeft/rumbleLastRight keep showing the server's raw
+        // values regardless of what the user has dialed in.
+        let left = rumbleEnabled ? min(max(rawLeft * rumbleIntensityMultiplier, 0), 1) : 0
+        let right = rumbleEnabled ? min(max(rawRight * rumbleIntensityMultiplier, 0), 1) : 0
+
         guard let targetId = Int(id),
               let key = controllerIds.first(where: { $0.value == targetId })?.key,
               let controller = GCController.controllers().first(where: { ObjectIdentifier($0) == key })

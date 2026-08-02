@@ -43,6 +43,15 @@ struct SettingsView: View {
                         onDecrease: { viewModel.streamSettings.controllerDeadzone = max(0, viewModel.streamSettings.controllerDeadzone - 0.05) },
                         onIncrease: { viewModel.streamSettings.controllerDeadzone = min(0.5, viewModel.streamSettings.controllerDeadzone + 0.05) }
                     )
+                    Toggle("Controller rumble", isOn: $viewModel.streamSettings.rumbleEnabled)
+                    if viewModel.streamSettings.rumbleEnabled {
+                        OptionRow(title: "Rumble intensity",
+                                  options: RumbleIntensity.allCases.map { ($0.displayName, $0) },
+                                  selection: $viewModel.streamSettings.rumbleIntensity)
+                    }
+                    Text("Takes effect the next time a game is started.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 section("Overlay") {
                     Toggle("Performance overlay", isOn: $viewModel.streamSettings.showStatsOverlay)
