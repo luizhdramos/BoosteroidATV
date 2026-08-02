@@ -13,6 +13,20 @@ protocol InputEventHandler: AnyObject {
     func sendMouseAbsolute(x: Int, y: Int)
     func sendMouseButton(down: Bool, button: UInt8)
     func sendMouseWheel(delta: Int16)
+    /// Forwards a REAL game controller's Menu/Start button (wire controller
+    /// button index 7) as an explicit down/up. CONFIRMED 2026-08-08: this
+    /// can't just rely on InputSender's own ~60Hz GCExtendedGamepad polling
+    /// like every other button does — with controllerUserInteractionEnabled
+    /// == false (raw input mode, set for the whole stream — see
+    /// StreamingViewController), GCExtendedGamepad.buttonMenu NEVER updates
+    /// its isPressed state at all; the OS instead redirects a real
+    /// controller's Menu/Start button straight to a system `.menu` UIPress,
+    /// exactly like the Siri Remote's own Back button (see
+    /// VideoSurfaceView.pressesBegan). So pollGamepad's read of
+    /// pad.buttonMenu.isPressed is always false and can never catch this
+    /// press — it has to be forwarded from the UIPress path instead, which
+    /// is what this method is for.
+    func sendControllerMenuButton(pressed: Bool)
 }
 
 // MARK: - Input Sender
@@ -230,6 +244,22 @@ final class InputSender: InputEventHandler {
         ]) }
     }
 
+    /// See the protocol doc comment for why this exists as its own path
+    /// instead of going through pollGamepad like every other button.
+    /// GCController.current is the controller that most recently produced
+    /// input — the same technique VideoSurfaceView.pressesBegan's
+    /// isSiriRemote check already uses to identify which physical device a
+    /// UIPress actually came from, since UIPress itself doesn't carry that.
+    func sendControllerMenuButton(pressed: Bool) {
+        guard let controller = GCController.current,
+              let id = controllerIds[ObjectIdentifier(controller)]
+        else { return }
+        controllerEventsSent += 1
+        Task { [controlChannel] in await controlChannel.send(type: "controller", action: "button", fields: [
+            "id": id, "button": 7, "value": pressed ? 1 : 0,
+        ]) }
+    }
+
     // MARK: - Controller Connect / Disconnect
 
     private func handleControllerConnected(_ controller: GCController) {
@@ -291,27 +321,22 @@ final class InputSender: InputEventHandler {
     private func pollGamepad(controller: GCController, id: Int, pad: GCExtendedGamepad) {
         let key = ObjectIdentifier(controller)
 
-        // The Siri Remote reports only a microGamepad profile — GameController
-        // synthesizes an extendedGamepad on top of it purely so apps that only
-        // handle extendedGamepad still work, which is why `pad` (and its
-        // buttonMenu) is non-nil for it too. A REAL physical controller never
-        // exposes microGamepad. Used below to tell the two apart.
-        let isSiriRemote = controller.microGamepad != nil
-
         // Buttons 0-9 — CONFIRMED indices, see BoosteroidControlChannel.
         let buttons: [(Int, Bool)] = [
             (0, pad.buttonA.isPressed), (1, pad.buttonB.isPressed),
             (2, pad.buttonX.isPressed), (3, pad.buttonY.isPressed),
             (4, pad.leftShoulder.isPressed), (5, pad.rightShoulder.isPressed),
             (6, pad.buttonOptions?.isPressed ?? false),
-            // The Siri Remote's Back/"<" button is claimed exclusively by
-            // this app's own in-stream bar (VideoSurfaceView.pressesBegan /
-            // StreamView's onExitCommand) — forwarding it here too would
-            // ALSO send it to the game as a gamepad Menu press every time
-            // the user just wanted to open our bar. A real controller's
-            // Menu/Guide button is unrelated and should keep reaching the
-            // game as normal.
-            (7, isSiriRemote ? false : pad.buttonMenu.isPressed),
+            // Button 7 (Menu/Start) is deliberately NOT read here — CONFIRMED
+            // 2026-08-08: with controllerUserInteractionEnabled == false (set
+            // for the whole stream), buttonMenu's isPressed/valueChangedHandler
+            // never updates at all for ANY controller, Siri Remote or real
+            // gamepad alike; the OS redirects that button straight to a
+            // system .menu UIPress instead (see
+            // VideoSurfaceView.pressesBegan). So polling it here would only
+            // ever read a permanently-stale `false` — it's sent from
+            // sendControllerMenuButton (driven by pressesBegan/pressesEnded)
+            // instead, the only path that actually observes it.
             (8, pad.leftThumbstickButton?.isPressed ?? false),
             (9, pad.rightThumbstickButton?.isPressed ?? false),
         ]
