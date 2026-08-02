@@ -501,6 +501,26 @@ final class InputSender: InputEventHandler {
               let key = controllerIds.first(where: { $0.value == targetId })?.key,
               let controller = GCController.controllers().first(where: { ObjectIdentifier($0) == key })
         else { return }
+
+        // BUG FIX (round 3, 2026-08-09): this cache check used to run AFTER
+        // the `controller.haptics` nil-check below. `GCController.haptics`
+        // is not a stable capability flag on some hardware — it can flip
+        // back to nil on later polls even after an engine was already
+        // created from it (BLE re-negotiation, system momentarily
+        // reclaiming the haptics engine, etc). With the old ordering, any
+        // such nil blip made this function bail out *before* reaching the
+        // cache, silently dropping that rumble update to an
+        // already-working HapticChannel and stomping
+        // rumbleHapticsAvailable back to false — which is consistent with
+        // the user seeing "Haptics: no" after previously confirmed "yes"
+        // with no other code change. Checking the cache first means once a
+        // channel exists we never need `controller.haptics` again — we
+        // already own the engine/player.
+        if let existing = hapticsByController[key] {
+            existing.update(left: left, right: right)
+            return
+        }
+
         guard let haptics = controller.haptics else {
             // DIAGNOSTIC: GameController itself says this controller has no
             // haptics support at all — most likely explanation for "rumble
@@ -508,11 +528,6 @@ final class InputSender: InputEventHandler {
             // nothing vibrates. Not something CoreHaptics code can route
             // around; the controller/firmware genuinely doesn't expose it.
             rumbleHapticsAvailable = false
-            return
-        }
-
-        if let existing = hapticsByController[key] {
-            existing.update(left: left, right: right)
             return
         }
         guard left > 0 || right > 0 else { return }
