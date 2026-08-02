@@ -339,6 +339,12 @@ struct StreamView: View {
         // motor behind it" — see InputSender.makeControllerHaptics).
         line += " | RumbleLR: \(String(format: "%.2f", controller.rumbleLastLeft))/\(String(format: "%.2f", controller.rumbleLastRight))"
         line += " | Localities: \(controller.rumbleSupportedLocalities)"
+        // DIAGNOSTIC round 3 (2026-08-09): Haptics yes, Localities set,
+        // RumbleLR nonzero, still no vibration — the previous code drove
+        // intensity via sendParameters wrapped in `try?`, so a silent
+        // failure there was invisible. Now every pattern rebuild's errors
+        // (see InputSender.HapticChannel) surface here instead.
+        if let rumbleSendError = controller.rumbleSendError { line += " | SendErr: \(rumbleSendError)" }
         // Video and input ride entirely separate connections — the control
         // channel can silently die (network blip, server timeout) while video
         // keeps playing perfectly, leaving mouse/keyboard/controller dead with

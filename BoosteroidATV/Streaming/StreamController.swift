@@ -88,6 +88,7 @@ final class StreamController: NSObject {
     private(set) var rumbleLastLeft: Double = 0
     private(set) var rumbleLastRight: Double = 0
     private(set) var rumbleSupportedLocalities: String = "-"
+    private(set) var rumbleSendError: String?
     /// Cursor position reported by the server, in remote-desktop pixels.
     /// nil until (or unless) the server sends one — see the `.cursor` note in
     /// BoosteroidControlChannel.
@@ -539,6 +540,7 @@ final class StreamController: NSObject {
                     self.rumbleLastLeft = sender.rumbleLastLeft
                     self.rumbleLastRight = sender.rumbleLastRight
                     self.rumbleSupportedLocalities = sender.rumbleSupportedLocalities
+                    self.rumbleSendError = sender.rumbleSendError
                 }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

@@ -90,6 +90,17 @@ final class InputSender: InputEventHandler {
     /// .default) may have silently created a channel that plays into
     /// nothing.
     private(set) var rumbleSupportedLocalities: String = "-"
+    /// DIAGNOSTIC (added 2026-08-09, round 3 — Haptics: yes, Localities set,
+    /// RumbleLR shows real nonzero values arriving, still nothing physically
+    /// vibrates): the old code drove intensity purely through
+    /// `player.sendParameters` wrapped in `try?`, so if that dynamic
+    /// parameter update silently failed or no-op'd against a
+    /// GCController-backed engine — plausible, since we already hit one
+    /// undocumented Apple gap in this exact API surface with the Advanced
+    /// player — we'd never know. Now surfaced here; see HapticChannel for
+    /// the actual fix (rebuild the pattern with the intensity baked in
+    /// statically instead of relying on live parameter modulation).
+    private(set) var rumbleSendError: String?
 
     // Per-controller server-assigned ids (CONFIRMED required before the
     // server accepts button/axes/pad events for that controller — see
@@ -448,18 +459,64 @@ final class InputSender: InputEventHandler {
     /// this uses one very long-duration continuous event (24h — more than any
     /// real streaming session) and drives it entirely via live
     /// sendParameters calls, same as before.
-    private struct HapticChannel {
+    /// FIX (round 3, 2026-08-09): this used to hold ONE long-running
+    /// continuous player started at intensity 0, nudged live via
+    /// `player.sendParameters([.hapticIntensityControl], ...)` wrapped in
+    /// `try?`. On a real device that setup succeeds with no thrown error and
+    /// rumble messages visibly arrive with real nonzero values (see
+    /// InputSender's RumbleLR/Localities diagnostics) — yet nothing
+    /// physically vibrates. Since `try?` swallowed any `sendParameters`
+    /// failure, there was no way to tell "modulation silently no-ops against
+    /// this GCController-backed engine" (which would exactly match the
+    /// already-confirmed Advanced-player XPC bug's flavor of "the API
+    /// accepts the call and does nothing") from "it's working and something
+    /// else is wrong". Rather than guess again, this class now sidesteps
+    /// live parameter modulation entirely: each `setIntensity` call stops
+    /// whatever's playing and starts a BRAND NEW pattern with the desired
+    /// intensity baked in as a static event parameter, only when the
+    /// intensity actually changes (guarded by `lastIntensity`, so a steady
+    /// rumble doesn't rebuild on every repeated identical message). Any
+    /// throw from that rebuild is reported via `onError` instead of being
+    /// silently dropped.
+    private final class HapticChannel {
         let engine: CHHapticEngine
-        let player: CHHapticPatternPlayer
+        private var player: CHHapticPatternPlayer?
+        private var lastIntensity: Double = -1
+        var onError: ((String) -> Void)?
+
+        init(engine: CHHapticEngine) {
+            self.engine = engine
+        }
 
         func setIntensity(_ value: Double) {
-            let clamped = Float(min(max(value, 0), 1))
-            let param = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: clamped, relativeTime: 0)
-            try? player.sendParameters([param], atTime: CHHapticTimeImmediate)
+            let clamped = min(max(value, 0), 1)
+            guard abs(clamped - lastIntensity) > 0.001 else { return }
+            lastIntensity = clamped
+            try? player?.stop(atTime: CHHapticTimeImmediate)
+            player = nil
+            guard clamped > 0 else { return }
+            do {
+                let event = CHHapticEvent(
+                    eventType: .hapticContinuous,
+                    parameters: [
+                        CHHapticEventParameter(parameterID: .hapticIntensity, value: Float(clamped)),
+                        CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5),
+                    ],
+                    relativeTime: 0,
+                    duration: 86_400 // 24h — replaced wholesale on the next intensity change anyway
+                )
+                let pattern = try CHHapticPattern(events: [event], parameters: [])
+                let newPlayer = try engine.makePlayer(with: pattern)
+                try newPlayer.start(atTime: CHHapticTimeImmediate)
+                player = newPlayer
+            } catch {
+                onError?(error.localizedDescription)
+            }
         }
 
         func stop() {
-            try? player.stop(atTime: CHHapticTimeImmediate)
+            try? player?.stop(atTime: CHHapticTimeImmediate)
+            player = nil
             engine.stop()
         }
     }
@@ -561,12 +618,9 @@ final class InputSender: InputEventHandler {
         return ControllerHaptics(left: nil, right: nil, combined: combined)
     }
 
-    /// One engine + a single very-long continuous event (24h — no
-    /// `loopEnabled` available on the plain player, see HapticChannel's doc
-    /// comment for why the Advanced player isn't used) starting at zero
-    /// intensity — intensity is then driven entirely via HapticChannel.
-    /// setIntensity's live sendParameters calls, so this initial pattern is
-    /// just a "holder", never heard at its own 0-intensity value.
+    /// Creates and starts just the engine for one locality — the actual
+    /// pattern/player is built lazily (and rebuilt on every real intensity
+    /// change) by HapticChannel itself, see its doc comment for why.
     private func makeChannel(haptics: GCDeviceHaptics, locality: GCHapticsLocality) -> HapticChannel? {
         guard let engine = haptics.createEngine(withLocality: locality) else {
             rumbleSetupError = "createEngine(withLocality: \(locality)) returned nil"
@@ -578,22 +632,12 @@ final class InputSender: InputEventHandler {
         engine.playsHapticsOnly = true
         do {
             try engine.start()
-            let event = CHHapticEvent(
-                eventType: .hapticContinuous,
-                parameters: [
-                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0),
-                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5),
-                ],
-                relativeTime: 0,
-                duration: 86_400 // 24h — longer than any real streaming session
-            )
-            let pattern = try CHHapticPattern(events: [event], parameters: [])
-            let player = try engine.makePlayer(with: pattern)
-            try player.start(atTime: CHHapticTimeImmediate)
-            return HapticChannel(engine: engine, player: player)
         } catch {
             rumbleSetupError = error.localizedDescription
             return nil
         }
+        let channel = HapticChannel(engine: engine)
+        channel.onError = { [weak self] message in self?.rumbleSendError = message }
+        return channel
     }
 }
