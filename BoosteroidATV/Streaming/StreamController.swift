@@ -82,6 +82,10 @@ final class StreamController: NSObject {
     /// DIAGNOSTIC ONLY — see InputSender.menuButtonHandlerFireCount's doc
     /// comment. Mirrored here purely to get it onto the Performance Overlay.
     private(set) var menuButtonHandlerFireCount = 0
+    /// DIAGNOSTIC ONLY — see InputSender.menuButtonPollSendCount /
+    /// lastPolledControllerIsSiriRemote's doc comments.
+    private(set) var menuButtonPollSendCount = 0
+    private(set) var lastPolledControllerIsSiriRemote = false
     /// Cursor position reported by the server, in remote-desktop pixels.
     /// nil until (or unless) the server sends one — see the `.cursor` note in
     /// BoosteroidControlChannel.
@@ -528,6 +532,8 @@ final class StreamController: NSObject {
                     self.controllerEventsSent = sender.controllerEventsSent
                     self.controllerAckId = sender.lastServerAckId ?? "none(provisional)"
                     self.menuButtonHandlerFireCount = sender.menuButtonHandlerFireCount
+                    self.menuButtonPollSendCount = sender.menuButtonPollSendCount
+                    self.lastPolledControllerIsSiriRemote = sender.lastPolledControllerIsSiriRemote
                 }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

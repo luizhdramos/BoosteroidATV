@@ -316,13 +316,18 @@ struct StreamView: View {
         let mbps = Double(controller.stats.bitrateKbps) / 1000
         var line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps | Stream FPS: \(controller.streamFps) | Latency: \(controller.rttMs)ms"
         if let connectedServerName { line += " | Server: \(connectedServerName)" }
-        // DIAGNOSTIC ONLY — see InputSender.menuButtonHandlerFireCount's doc
-        // comment. Press Start/Select on a real controller and watch this
-        // number: if it never moves off 0, GameController's buttonMenu
-        // handler genuinely never fires for this button in this input mode
-        // (on THIS controller/firmware) — that's the real answer to why
-        // Start doesn't reach the game, instead of guessing again.
+        // DIAGNOSTIC ONLY (see InputSender's doc comments on these three
+        // properties): MenuBtn confirmed the GameController framework DOES
+        // see Start/Select (it climbs by 2 per press — down+up — exactly as
+        // reported). PollSend and SiriRemote narrow down WHERE it then gets
+        // lost: PollSend should climb in lockstep with MenuBtn if
+        // pollGamepad's own send is firing correctly; if PollSend stays at 0
+        // while MenuBtn climbs, the isSiriRemote guard below is wrongly
+        // true for this controller and SiriRemote will read `true` to prove
+        // it.
         line += " | MenuBtn: \(controller.menuButtonHandlerFireCount)"
+        line += " | PollSend: \(controller.menuButtonPollSendCount)"
+        line += " | SiriRemote: \(controller.lastPolledControllerIsSiriRemote)"
         // Video and input ride entirely separate connections — the control
         // channel can silently die (network blip, server timeout) while video
         // keeps playing perfectly, leaving mouse/keyboard/controller dead with

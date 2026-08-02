@@ -79,6 +79,19 @@ final class InputSender: InputEventHandler {
     /// need its own real bug fix, not just resurrecting it as-is).
     private(set) var menuButtonHandlerFireCount = 0
     private(set) var menuButtonHandlerLastPressed = false
+    /// DIAGNOSTIC ONLY: what pollGamepad's OWN read of button 7 actually saw,
+    /// each tick, for whichever controller polled last — lets us tell apart
+    /// "the send pipeline never even tries" (this stays 0) from "it sends,
+    /// but something after that drops it" (this moves in lockstep with
+    /// menuButtonHandlerFireCount above, which is driven by a totally
+    /// separate GameController API).
+    private(set) var menuButtonPollSendCount = 0
+    /// DIAGNOSTIC ONLY: `controller.microGamepad != nil` as read by
+    /// pollGamepad for whichever controller polled last — if this is
+    /// unexpectedly `true` for a REAL controller, that alone would explain
+    /// button 7 never being sent (isSiriRemote forces it to `false`
+    /// regardless of the actual press).
+    private(set) var lastPolledControllerIsSiriRemote = false
 
     // Per-controller server-assigned ids (CONFIRMED required before the
     // server accepts button/axes/pad events for that controller — see
@@ -325,6 +338,7 @@ final class InputSender: InputEventHandler {
         // buttonMenu) is non-nil for it too. A REAL physical controller never
         // exposes microGamepad. Used below to tell the two apart.
         let isSiriRemote = controller.microGamepad != nil
+        lastPolledControllerIsSiriRemote = isSiriRemote
 
         // Buttons 0-9 — CONFIRMED indices, see BoosteroidControlChannel.
         let buttons: [(Int, Bool)] = [
@@ -357,6 +371,7 @@ final class InputSender: InputEventHandler {
             if buttonState[index] != isPressed {
                 buttonState[index] = isPressed
                 controllerEventsSent += 1
+                if index == 7 { menuButtonPollSendCount += 1 } // DIAGNOSTIC ONLY
                 Task { [controlChannel] in await controlChannel.send(type: "controller", action: "button", fields: [
                     "id": id, "button": index, "value": isPressed ? 1 : 0,
                 ]) }
