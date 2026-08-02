@@ -496,11 +496,22 @@ final class InputSender: InputEventHandler {
             player = nil
             guard clamped > 0 else { return }
             do {
+                // Sharpness scales with intensity instead of a flat 0.5: low-
+                // strength rumble (e.g. a light controller nudge) reads as a
+                // duller, lower-frequency thud, while strong rumble (impacts,
+                // explosions) reads as a sharper, higher-frequency buzz.
+                // CoreHaptics is the generic bridge Apple uses to drive
+                // whatever actuator the controller actually has — including
+                // Nintendo's HD Rumble LRA motors, confirmed working on a
+                // real Switch controller — so there's no separate "HD
+                // Rumble" API to target; this just uses more of the range
+                // CoreHaptics already exposes.
+                let sharpness = Float(0.3 + clamped * 0.5)
                 let event = CHHapticEvent(
                     eventType: .hapticContinuous,
                     parameters: [
                         CHHapticEventParameter(parameterID: .hapticIntensity, value: Float(clamped)),
-                        CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5),
+                        CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness),
                     ],
                     relativeTime: 0,
                     duration: 86_400 // 24h — replaced wholesale on the next intensity change anyway
