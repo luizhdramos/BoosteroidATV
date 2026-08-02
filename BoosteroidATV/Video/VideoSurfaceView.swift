@@ -223,26 +223,27 @@ final class VideoSurfaceView: UIView {
                 // presented fullScreenCover), a real controller's Start
                 // button was ALSO silently exiting the stream back to Home.
                 //
-                // The first fix (just swallowing this press) stopped the
-                // unwanted exit, but Start still never reached the GAME —
-                // CONFIRMED 2026-08-08: with controllerUserInteractionEnabled
-                // == false, GCExtendedGamepad.buttonMenu's isPressed/
-                // valueChangedHandler never fires at all; the OS redirects
-                // the press here, to pressesBegan, INSTEAD of updating that
-                // state. So InputSender's ~60Hz pollGamepad — which is what
-                // forwards every other button — can never see this one no
-                // matter what we do here; it has to be sent explicitly. See
-                // InputEventHandler.sendControllerMenuButton's doc comment.
+                // Swallowing it here is enough — CONFIRMED 2026-08-09 on a
+                // real device: InputSender's ~60Hz pollGamepad already
+                // forwards this same button to the game independently, by
+                // reading GCExtendedGamepad.buttonMenu.isPressed directly
+                // (see its isSiriRemote guard there). An earlier pass
+                // (b509aef) assumed that poll could never see this button
+                // while controllerUserInteractionEnabled == false and added
+                // a whole separate explicit-send path here instead — that
+                // assumption was wrong and the extra path actually broke
+                // Start (confirmed working before it, at e16737e). Reverted
+                // to just consuming the UIPress so it doesn't dismiss the
+                // stream; the actual button-7 send is entirely pollGamepad's
+                // job, unchanged.
                 //
                 // Only the Siri Remote should get the natural dismiss-to-
                 // Home behavior; GCController.current is set to whichever
                 // controller most recently produced input, which at this
                 // exact moment is the one that sent THIS press (same
-                // technique InputSender.pollGamepad already uses to tell
-                // them apart).
+                // technique InputSender.pollGamepad uses to tell them apart).
                 let isSiriRemote = GCController.current?.microGamepad != nil
                 if !isSiriRemote {
-                    inputHandler?.sendControllerMenuButton(pressed: true)
                     handled = true
                 }
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
@@ -261,16 +262,7 @@ final class VideoSurfaceView: UIView {
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
-            if press.type == .menu, GCController.current?.microGamepad == nil {
-                // Mirrors pressesBegan's .menu handling — sends the release
-                // half of the same Start button press. (No matching branch
-                // needed for the Siri Remote's own Back button: the
-                // system's default dismiss action already fires on the
-                // "began" phase, so its "ended" phase falling through to
-                // super here is a no-op, same as it always was.)
-                inputHandler?.sendControllerMenuButton(pressed: false)
-                handled = true
-            } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
+            if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
                 inputHandler?.sendKeyEvent(
                     down: false,
                     vk: mapping.vk,
