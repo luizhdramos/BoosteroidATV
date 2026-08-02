@@ -420,11 +420,28 @@ final class InputSender: InputEventHandler {
     // sendParameters — the same technique Apple's own GameController haptics
     // sample code uses for continuous, variable-intensity feedback.
 
-    /// One CoreHaptics engine + looping player pinned to a single haptics
-    /// locality (e.g. the left or right rumble motor).
+    /// One CoreHaptics engine + player pinned to a single haptics locality
+    /// (e.g. the left or right rumble motor).
+    ///
+    /// CONFIRMED 2026-08-09 (real device: error "Sync XPC call for
+    /// 'loadAndPrepareHapticSequenceFromEvents:reply:' ... Could not
+    /// communicate with a helper application" / "connection to service ...
+    /// com.apple.GameController.gamecontrollerd.haptics") — this is a KNOWN,
+    /// still-unresolved Apple bug, not something wrong in this file:
+    /// `CHHapticAdvancedPatternPlayer` (via `engine.makeAdvancedPlayer`)
+    /// reliably fails this exact way against a GCController-provided haptics
+    /// engine (see the Apple Developer Forums thread "CHHapticAdvancedPatternPlayer
+    /// not working with GCController" — an Apple DTS engineer's only reply was
+    /// "please file a bug", no fix). The PLAIN `CHHapticPatternPlayer` (via
+    /// `engine.makePlayer`) works fine on the same engine in that same report,
+    /// and that holds here too. The trade-off: the plain player has no
+    /// `loopEnabled`/`loopEnd` (Advanced-only), so instead of a 1-second loop
+    /// this uses one very long-duration continuous event (24h — more than any
+    /// real streaming session) and drives it entirely via live
+    /// sendParameters calls, same as before.
     private struct HapticChannel {
         let engine: CHHapticEngine
-        let player: CHHapticAdvancedPatternPlayer
+        let player: CHHapticPatternPlayer
 
         func setIntensity(_ value: Double) {
             let clamped = Float(min(max(value, 0), 1))
@@ -512,16 +529,21 @@ final class InputSender: InputEventHandler {
         return ControllerHaptics(left: nil, right: nil, combined: combined)
     }
 
-    /// One engine + a 1-second continuous event looped forever (`loopEnabled`)
-    /// starting at zero intensity — intensity is then driven entirely via
-    /// HapticChannel.setIntensity's live sendParameters calls, so this
-    /// initial pattern is just a "holder" the loop plays, never heard at its
-    /// own 0-intensity value.
+    /// One engine + a single very-long continuous event (24h — no
+    /// `loopEnabled` available on the plain player, see HapticChannel's doc
+    /// comment for why the Advanced player isn't used) starting at zero
+    /// intensity — intensity is then driven entirely via HapticChannel.
+    /// setIntensity's live sendParameters calls, so this initial pattern is
+    /// just a "holder", never heard at its own 0-intensity value.
     private func makeChannel(haptics: GCDeviceHaptics, locality: GCHapticsLocality) -> HapticChannel? {
         guard let engine = haptics.createEngine(withLocality: locality) else {
             rumbleSetupError = "createEngine(withLocality: \(locality)) returned nil"
             return nil
         }
+        // Matches Apple's own sample code for GCController-backed engines:
+        // this engine only ever plays haptics, never audio, so it doesn't
+        // need to negotiate an AVAudioSession category at all.
+        engine.playsHapticsOnly = true
         do {
             try engine.start()
             let event = CHHapticEvent(
@@ -531,12 +553,10 @@ final class InputSender: InputEventHandler {
                     CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5),
                 ],
                 relativeTime: 0,
-                duration: 1
+                duration: 86_400 // 24h — longer than any real streaming session
             )
             let pattern = try CHHapticPattern(events: [event], parameters: [])
-            let player = try engine.makeAdvancedPlayer(with: pattern)
-            player.loopEnabled = true
-            player.loopEnd = 1
+            let player = try engine.makePlayer(with: pattern)
             try player.start(atTime: CHHapticTimeImmediate)
             return HapticChannel(engine: engine, player: player)
         } catch {
