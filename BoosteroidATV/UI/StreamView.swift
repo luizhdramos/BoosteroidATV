@@ -17,6 +17,20 @@ private enum VK {
     static let up: UInt16 = 0x26
     static let right: UInt16 = 0x27
     static let down: UInt16 = 0x28
+    // Standard Win32 OEM punctuation VK codes (winuser.h) — unlike letters
+    // and digits, these don't line up with their ASCII/unicode values, so
+    // VirtualKeyboardView can't derive them from the key's own character.
+    static let backtick: UInt16 = 0xC0
+    static let minus: UInt16 = 0xBD
+    static let equals: UInt16 = 0xBB
+    static let leftBracket: UInt16 = 0xDB
+    static let rightBracket: UInt16 = 0xDD
+    static let backslash: UInt16 = 0xDC
+    static let semicolon: UInt16 = 0xBA
+    static let quote: UInt16 = 0xDE
+    static let comma: UInt16 = 0xBC
+    static let period: UInt16 = 0xBE
+    static let slash: UInt16 = 0xBF
 }
 
 /// Drives StreamController against BoosteroidClient's CONFIRMED,
@@ -46,6 +60,10 @@ struct StreamView: View {
     /// The "More Options" pill's dropdown panel (Back to Menu / Performance
     /// Overlay / Stream Details), nested under the main top bar.
     @State private var showMoreOptions = false
+    /// The "Performance Overlay" row's own flyout (Enable/Disable), opening
+    /// to the left of the More Options panel — a nested submenu, not an
+    /// inline toggle.
+    @State private var showPerformanceFlyout = false
     /// nil = follow the session's saved Settings value; set once the user
     /// flips it from the in-stream Performance Overlay toggle, for the rest
     /// of this session only (not persisted — Settings remains the default).
@@ -145,11 +163,17 @@ struct StreamView: View {
                     pointerCursor
                 }
                 if showKeyboard {
-                    VirtualKeyboardView(
-                        inputHandler: controller.inputSender,
-                        onClose: { showKeyboard = false }
-                    )
-                    .padding(40)
+                    // Bottom-center, not floating mid-screen — matches the
+                    // reference design and keeps it clear of the game's own
+                    // center-screen UI.
+                    VStack {
+                        Spacer()
+                        VirtualKeyboardView(
+                            inputHandler: controller.inputSender,
+                            onClose: { showKeyboard = false }
+                        )
+                        .padding(.bottom, 48)
+                    }
                 } else if showOverlay {
                     topBarOverlay
                 }
@@ -189,6 +213,8 @@ struct StreamView: View {
             case .streaming:
                 if showKeyboard {
                     showKeyboard = false
+                } else if showPerformanceFlyout {
+                    showPerformanceFlyout = false
                 } else if showMoreOptions {
                     showMoreOptions = false
                 } else {
@@ -342,6 +368,7 @@ struct StreamView: View {
                     }
                     topBarPill("More Options", systemImage: "ellipsis.circle", active: showMoreOptions) {
                         showMoreOptions.toggle()
+                        if !showMoreOptions { showPerformanceFlyout = false }
                     }
                 }
             }
@@ -356,12 +383,18 @@ struct StreamView: View {
             )
 
             if showMoreOptions {
-                HStack {
+                HStack(alignment: .top, spacing: 12) {
                     Spacer()
+                    // Opens to the LEFT of the main panel (matches the
+                    // reference design) — listed first in this HStack, with
+                    // the main panel pinned to the trailing edge after it.
+                    if showPerformanceFlyout {
+                        performanceOverlayFlyout
+                    }
                     moreOptionsPanel
-                        .padding(.trailing, 32)
-                        .padding(.top, 8)
                 }
+                .padding(.trailing, 32)
+                .padding(.top, 8)
             }
 
             Spacer()
@@ -387,7 +420,8 @@ struct StreamView: View {
         .tint(active ? .white : .gray)
     }
 
-    /// "Back to Menu" / "Performance Overlay" (On/Off) / "Stream Details"
+    /// "Back to Menu" / "Performance Overlay" (opens its own Enable/Disable
+    /// flyout to the left — see performanceOverlayFlyout) / "Stream Details"
     /// (placeholder — content still TBD).
     private var moreOptionsPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -406,28 +440,29 @@ struct StreamView: View {
             .tint(.gray)
             .padding(.horizontal, 12)
             .padding(.top, 12)
+            .padding(.bottom, 8)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("PERFORMANCE OVERLAY")
-                    .font(.caption2.weight(.bold))
-                    .tracking(1.5)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 12) {
-                    Button("On") { statsOverlayOverride = true }
-                        .buttonStyle(.bordered)
-                        .tint(showStats ? .white : .gray)
-                    Button("Off") { statsOverlayOverride = false }
-                        .buttonStyle(.bordered)
-                        .tint(showStats ? .gray : .white)
+            Divider().background(.white.opacity(0.15)).padding(.horizontal, 12)
+
+            Button {
+                showPerformanceFlyout.toggle()
+            } label: {
+                HStack {
+                    Image(systemName: "gauge.with.dots.needle.67percent")
+                    Text("Performance Overlay")
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
                 }
             }
+            .buttonStyle(.bordered)
+            .tint(showPerformanceFlyout ? .white : .gray)
             .padding(.horizontal, 12)
-            .padding(.vertical, 14)
+            .padding(.top, 8)
 
             Button {
                 // Stream Details: intentionally empty for now — content TBD.
             } label: {
-                Label("Stream Details", systemImage: "chevron.right")
+                Label("Stream Details", systemImage: "chart.bar")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.bordered)
@@ -437,6 +472,35 @@ struct StreamView: View {
         }
         .frame(width: 340)
         .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    /// The Performance Overlay row's own nested submenu (Enable/Disable),
+    /// a proper cascading flyout rather than inline buttons — matches the
+    /// reference design, which pops this out to the left of the main panel.
+    private var performanceOverlayFlyout: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            performanceFlyoutRow("Enable", selected: showStats) { statsOverlayOverride = true }
+            performanceFlyoutRow("Disable", selected: !showStats) { statsOverlayOverride = false }
+        }
+        .padding(.vertical, 8)
+        .frame(width: 220)
+        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder
+    private func performanceFlyoutRow(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                if selected {
+                    Image(systemName: "checkmark")
+                }
+                Text(title)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
+        .tint(.gray)
+        .padding(.horizontal, 8)
     }
 
     /// Standard Steam in-game-overlay hotkey (Shift+Tab): a real key-down for
@@ -766,51 +830,76 @@ struct VirtualKeyboardView: View {
 
     // Uses the file-scope VK enum (Windows Virtual-Key codes) defined above.
 
-    private let rows: [[String]] = [
-        ["1","2","3","4","5","6","7","8","9","0"],
-        ["Q","W","E","R","T","Y","U","I","O","P"],
-        ["A","S","D","F","G","H","J","K","L"],
-        ["Z","X","C","V","B","N","M"],
-    ]
+    private let topRow: [String] = ["1","2","3","4","5","6","7","8","9","0"]
+    private let qwertyRow: [String] = ["Q","W","E","R","T","Y","U","I","O","P"]
+    private let homeRow: [String] = ["A","S","D","F","G","H","J","K","L"]
+    private let bottomRow: [String] = ["Z","X","C","V","B","N","M"]
 
+    // Full QWERTY layout (numbers/punctuation included, real key placement)
+    // per the reference design, rather than the old letters-only + a
+    // separate function-key row.
     var body: some View {
-        VStack(spacing: 14) {
-            ForEach(rows, id: \.self) { row in
-                HStack(spacing: 10) {
-                    ForEach(row, id: \.self) { key in
-                        keyButton(shifted ? key : key.lowercased()) {
-                            send(vk: UInt16(key.unicodeScalars.first!.value))
-                        }
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                keyButton("`") { send(vk: VK.backtick) }
+                ForEach(topRow, id: \.self) { key in
+                    keyButton(key) { send(vk: UInt16(key.unicodeScalars.first!.value)) }
+                }
+                keyButton("-") { send(vk: VK.minus) }
+                keyButton("=") { send(vk: VK.equals) }
+                keyButton("Backspace", width: 130, tint: .red) { send(vk: VK.back) }
+            }
+            HStack(spacing: 8) {
+                keyButton("Tab", width: 90) { send(vk: VK.tab) }
+                ForEach(qwertyRow, id: \.self) { key in
+                    keyButton(shifted ? key : key.lowercased()) {
+                        send(vk: UInt16(key.unicodeScalars.first!.value))
                     }
                 }
+                keyButton("[") { send(vk: VK.leftBracket) }
+                keyButton("]") { send(vk: VK.rightBracket) }
+                keyButton("\\") { send(vk: VK.backslash) }
             }
-            HStack(spacing: 10) {
-                keyButton(shifted ? "Shift ON" : "Shift", wide: true) { shifted.toggle() }
-                keyButton("Space", wide: true) { send(vk: VK.space) }
-                keyButton("Enter", wide: true) { send(vk: VK.enter) }
-                keyButton("Back", wide: true) { send(vk: VK.back) }
+            HStack(spacing: 8) {
+                ForEach(homeRow, id: \.self) { key in
+                    keyButton(shifted ? key : key.lowercased()) {
+                        send(vk: UInt16(key.unicodeScalars.first!.value))
+                    }
+                }
+                keyButton(";") { send(vk: VK.semicolon) }
+                keyButton("'") { send(vk: VK.quote) }
+                keyButton("Enter", width: 130) { send(vk: VK.enter) }
             }
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                keyButton(shifted ? "Shift ON" : "Shift", width: 110) { shifted.toggle() }
+                ForEach(bottomRow, id: \.self) { key in
+                    keyButton(shifted ? key : key.lowercased()) {
+                        send(vk: UInt16(key.unicodeScalars.first!.value))
+                    }
+                }
+                keyButton(",") { send(vk: VK.comma) }
+                keyButton(".") { send(vk: VK.period) }
+                keyButton("/") { send(vk: VK.slash) }
+            }
+            HStack(spacing: 8) {
                 keyButton("Esc") { send(vk: VK.escape) }
-                keyButton("Tab") { send(vk: VK.tab) }
+                keyButton("Space", width: 340) { send(vk: VK.space) }
                 keyButton("←") { send(vk: VK.left) }
                 keyButton("↑") { send(vk: VK.up) }
                 keyButton("↓") { send(vk: VK.down) }
                 keyButton("→") { send(vk: VK.right) }
-                keyButton("Close", wide: true, tint: .red) { onClose() }
+                keyButton("Close", width: 90, tint: .red) { onClose() }
             }
         }
-        .padding(28)
-        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 20))
     }
 
     @ViewBuilder
-    private func keyButton(_ label: String, wide: Bool = false, tint: Color = .gray,
+    private func keyButton(_ label: String, width: CGFloat = 64, tint: Color = .gray,
                            action: @escaping () -> Void) -> some View {
         Button(label, action: action)
             .buttonStyle(.bordered)
             .tint(tint)
-            .frame(minWidth: wide ? 150 : 70)
+            .frame(minWidth: width)
     }
 
     /// Tap = press and release. `shifted` is reported as the modifier bit the

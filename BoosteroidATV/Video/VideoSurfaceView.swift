@@ -198,10 +198,15 @@ final class VideoSurfaceView: UIView {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
-            if press.type == .menu || press.type == .playPause {
-                // Both open the in-stream menu (the only way back Home, since
-                // the game surface otherwise captures every press). The overlay
-                // itself handles closing (Resume / exit-command).
+            if press.type == .playPause {
+                // Play/Pause opens the in-stream bar. NOTE: .menu (the Siri
+                // Remote's Back/"<" button) used to be handled here too, but
+                // that made it fight with StreamView's .onExitCommand — both
+                // fired for the SAME physical press, one setting showOverlay
+                // and the other toggling it, which canceled out and made
+                // Back appear to do nothing. Back is now handled EXCLUSIVELY
+                // by .onExitCommand (falls through to super below), so
+                // there's only one source of truth for it.
                 menuPressHandler?()
                 handled = true
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {

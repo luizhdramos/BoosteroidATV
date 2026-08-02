@@ -282,12 +282,27 @@ final class InputSender: InputEventHandler {
     private func pollGamepad(controller: GCController, id: Int, pad: GCExtendedGamepad) {
         let key = ObjectIdentifier(controller)
 
+        // The Siri Remote reports only a microGamepad profile — GameController
+        // synthesizes an extendedGamepad on top of it purely so apps that only
+        // handle extendedGamepad still work, which is why `pad` (and its
+        // buttonMenu) is non-nil for it too. A REAL physical controller never
+        // exposes microGamepad. Used below to tell the two apart.
+        let isSiriRemote = controller.microGamepad != nil
+
         // Buttons 0-9 — CONFIRMED indices, see BoosteroidControlChannel.
         let buttons: [(Int, Bool)] = [
             (0, pad.buttonA.isPressed), (1, pad.buttonB.isPressed),
             (2, pad.buttonX.isPressed), (3, pad.buttonY.isPressed),
             (4, pad.leftShoulder.isPressed), (5, pad.rightShoulder.isPressed),
-            (6, pad.buttonOptions?.isPressed ?? false), (7, pad.buttonMenu.isPressed),
+            (6, pad.buttonOptions?.isPressed ?? false),
+            // The Siri Remote's Back/"<" button is claimed exclusively by
+            // this app's own in-stream bar (VideoSurfaceView.pressesBegan /
+            // StreamView's onExitCommand) — forwarding it here too would
+            // ALSO send it to the game as a gamepad Menu press every time
+            // the user just wanted to open our bar. A real controller's
+            // Menu/Guide button is unrelated and should keep reaching the
+            // game as normal.
+            (7, isSiriRemote ? false : pad.buttonMenu.isPressed),
             (8, pad.leftThumbstickButton?.isPressed ?? false),
             (9, pad.rightThumbstickButton?.isPressed ?? false),
         ]
