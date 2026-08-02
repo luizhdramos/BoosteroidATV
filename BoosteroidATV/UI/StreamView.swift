@@ -200,14 +200,21 @@ struct StreamView: View {
                 controller.disconnect()
             }
         }
-        // Mounted unconditionally (not nested inside topBarOverlay) so it's
-        // active from the very first frame. On tvOS a presented
-        // fullScreenCover dismisses itself on the Menu button by default
-        // unless something handles onExitCommand — nesting it only inside
-        // the overlay left a gap where the very first Menu press (before
-        // the overlay existed) fell through to that default dismiss AT THE
-        // SAME TIME our own onMenu handler was opening the bar, which is why
-        // pressing back both showed the menu AND bounced back to Home.
+        // CONFIRMED against Apple's Game Controller Programming Guide: this
+        // only handles CLOSING the bar (see the .streaming case's final
+        // else branch) — OPENING it is VideoSurfaceView.pressesBegan's job,
+        // not this. While just playing, controllerUserInteractionEnabled is
+        // false, so Menu/Back is routed to whichever view is first
+        // responder (the video view) via pressesBegan, bypassing the
+        // standard focus system entirely — .onExitCommand does not fire in
+        // that state at all, regardless of where it's mounted. Once the bar
+        // is open, controllerUserInteractionEnabled flips true and focus
+        // moves to a real SwiftUI Button, so standard interaction (and this
+        // onExitCommand) takes over for closing/collapsing.
+        //
+        // Mounted unconditionally (not nested inside topBarOverlay) purely
+        // so this still applies during the queue/connect screen too (see
+        // the `default` case below, which uses it as Cancel).
         .onExitCommand {
             switch controller.state {
             case .streaming:

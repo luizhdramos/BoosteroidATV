@@ -198,15 +198,29 @@ final class VideoSurfaceView: UIView {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
-            if press.type == .playPause {
-                // Play/Pause opens the in-stream bar. NOTE: .menu (the Siri
-                // Remote's Back/"<" button) used to be handled here too, but
-                // that made it fight with StreamView's .onExitCommand — both
-                // fired for the SAME physical press, one setting showOverlay
-                // and the other toggling it, which canceled out and made
-                // Back appear to do nothing. Back is now handled EXCLUSIVELY
-                // by .onExitCommand (falls through to super below), so
-                // there's only one source of truth for it.
+            if press.type == .menu || press.type == .playPause {
+                // Both OPEN the in-stream bar. CONFIRMED against Apple's own
+                // Game Controller Programming Guide ("Controlling Input on
+                // tvOS"): with controllerUserInteractionEnabled == false
+                // (the default here, while just playing), Menu/Back is
+                // delivered to whichever view is first responder — this
+                // view — via pressesBegan, NOT through the standard
+                // UIKit/SwiftUI focus system. .onExitCommand does NOT
+                // reliably fire in that state at all (it needs the standard
+                // focus system, which this mode bypasses), so relying on it
+                // alone to OPEN the bar (a prior attempt) left Back doing
+                // nothing. The other half of Apple's documented rule: not
+                // calling super.pressesBegan() for a press means UIKit's
+                // default action (e.g. dismissing this presented
+                // fullScreenCover) never fires for it — that's the "handled
+                // = true, no super call" below, and it's what stops Back
+                // from also bouncing back to Home.
+                //
+                // Once the bar is open, StreamingViewController flips
+                // controllerUserInteractionEnabled to true and focus moves
+                // to a real SwiftUI Button — from that point on, standard
+                // interaction IS active, so closing/collapsing is handled
+                // by StreamView's .onExitCommand instead, not here.
                 menuPressHandler?()
                 handled = true
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
