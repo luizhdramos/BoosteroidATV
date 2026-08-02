@@ -50,6 +50,10 @@ struct StreamView: View {
     /// flips it from the in-stream Performance Overlay toggle, for the rest
     /// of this session only (not persisted — Settings remains the default).
     @State private var statsOverlayOverride: Bool?
+    /// Set by "Back to Menu": leave the session running and just navigate
+    /// back Home, instead of tearing the connection down the way the
+    /// explicit Disconnect button does — see the .onDisappear note below.
+    @State private var leaveWithoutDisconnecting = false
     @State private var errorMessage: String?
     @State private var queueAttempt = 0
     @State private var queueStatus = ""
@@ -111,14 +115,12 @@ struct StreamView: View {
                     // Focus must reach SwiftUI whenever an overlay is up, or the
                     // on-screen keyboard's keys can't be selected.
                     showOverlay: showOverlay || showKeyboard,
-                    onMenu: {
-                        if showOverlay {
-                            showOverlay = false
-                            showMoreOptions = false
-                        } else {
-                            showOverlay = true
-                        }
-                    },
+                    // Only ever OPENS the bar. Closing/collapsing is owned
+                    // exclusively by the root .onExitCommand below — once the
+                    // bar is up, focus has moved from this raw UIKit view to
+                    // a SwiftUI button, so a second Menu press is delivered
+                    // through SwiftUI's focus system, not here.
+                    onMenu: { showOverlay = true },
                     pointerMode: pointerMode,
                     onPointerPosition: { localCursor = $0 },
                     // Pointer coordinates are in the REMOTE desktop's pixels, so
@@ -166,7 +168,37 @@ struct StreamView: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
-            controller.disconnect()
+            // "Back to Menu" leaves the session alone (see leaveWithoutDisconnecting);
+            // every other way this view goes away — Disconnect, an error's
+            // Close button, a failed/disconnected status screen — tears the
+            // local connection down as before.
+            if !leaveWithoutDisconnecting {
+                controller.disconnect()
+            }
+        }
+        // Mounted unconditionally (not nested inside topBarOverlay) so it's
+        // active from the very first frame. On tvOS a presented
+        // fullScreenCover dismisses itself on the Menu button by default
+        // unless something handles onExitCommand — nesting it only inside
+        // the overlay left a gap where the very first Menu press (before
+        // the overlay existed) fell through to that default dismiss AT THE
+        // SAME TIME our own onMenu handler was opening the bar, which is why
+        // pressing back both showed the menu AND bounced back to Home.
+        .onExitCommand {
+            switch controller.state {
+            case .streaming:
+                if showKeyboard {
+                    showKeyboard = false
+                } else if showMoreOptions {
+                    showMoreOptions = false
+                } else {
+                    showOverlay.toggle()
+                }
+            default:
+                // Queue/connect screen: Menu acts as Cancel, same as the
+                // Cancel button, instead of doing nothing.
+                onDismiss()
+            }
         }
     }
 
@@ -269,8 +301,9 @@ struct StreamView: View {
     // visible underneath), not a full-screen pause modal — Disconnect on the
     // left, Keyboard / Pointer / Steam Overlay / More Options on the right.
     // The Menu/back remote button opens it; pressing Menu again collapses it
-    // (the More Options panel, if open, collapses first — see onExitCommand
-    // below and onMenu in the .streaming case above).
+    // (the More Options panel, if open, collapses first) — see the root
+    // .onExitCommand in body, which owns all of that closing/collapsing
+    // logic so it's active from the very first frame.
 
     private var showStats: Bool { statsOverlayOverride ?? settings.showStatsOverlay }
 
@@ -333,15 +366,11 @@ struct StreamView: View {
 
             Spacer()
         }
-        // First Menu press collapses More Options (if open); the next one
-        // closes the whole bar — handled by onMenu in the .streaming case.
-        .onExitCommand {
-            if showMoreOptions {
-                showMoreOptions = false
-            } else {
-                showOverlay = false
-            }
-        }
+        // Closing/collapsing is handled by the root .onExitCommand (see
+        // body) — it needs to be mounted unconditionally, not nested here,
+        // or the very first Menu press (before this view exists) falls
+        // through to the system's default "dismiss the fullScreenCover"
+        // instead of our own logic.
     }
 
     @ViewBuilder
@@ -362,8 +391,13 @@ struct StreamView: View {
     /// (placeholder — content still TBD).
     private var moreOptionsPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Goes back to the Home/games screen WITHOUT disconnecting —
+            // unlike the top-left Disconnect pill, which tears the
+            // connection down. See leaveWithoutDisconnecting's use in
+            // .onDisappear.
             Button {
-                showMoreOptions = false
+                leaveWithoutDisconnecting = true
+                onDismiss()
             } label: {
                 Label("Back to Menu", systemImage: "chevron.left")
                     .frame(maxWidth: .infinity, alignment: .leading)
