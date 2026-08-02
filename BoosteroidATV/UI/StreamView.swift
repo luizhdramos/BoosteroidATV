@@ -57,21 +57,12 @@ struct StreamView: View {
     /// real cursor because pointer mode pins it to (0,0) when switched on.
     @State private var localCursor: CGPoint = .zero
     @State private var showKeyboard = false
-    /// The "More Options" pill's dropdown panel (Back to Menu / Performance
-    /// Overlay / Stream Details), nested under the main top bar.
-    @State private var showMoreOptions = false
-    /// The "Performance Overlay" row's own flyout (Enable/Disable), opening
-    /// to the left of the More Options panel — a nested submenu, not an
-    /// inline toggle.
+    /// The "Performance Overlay" pill's own Enable/Disable flyout.
     @State private var showPerformanceFlyout = false
     /// nil = follow the session's saved Settings value; set once the user
     /// flips it from the in-stream Performance Overlay toggle, for the rest
     /// of this session only (not persisted — Settings remains the default).
     @State private var statsOverlayOverride: Bool?
-    /// Set by "Back to Menu": leave the session running and just navigate
-    /// back Home, instead of tearing the connection down the way the
-    /// explicit Disconnect button does — see the .onDisappear note below.
-    @State private var leaveWithoutDisconnecting = false
     @State private var errorMessage: String?
     @State private var queueAttempt = 0
     @State private var queueStatus = ""
@@ -133,12 +124,21 @@ struct StreamView: View {
                     // Focus must reach SwiftUI whenever an overlay is up, or the
                     // on-screen keyboard's keys can't be selected.
                     showOverlay: showOverlay || showKeyboard,
-                    // Only ever OPENS the bar. Closing/collapsing is owned
-                    // exclusively by the root .onExitCommand below — once the
-                    // bar is up, focus has moved from this raw UIKit view to
-                    // a SwiftUI button, so a second Menu press is delivered
-                    // through SwiftUI's focus system, not here.
-                    onMenu: { showOverlay = true },
+                    // Play/Pause is now the ONLY way to open/close the bar:
+                    // closes the keyboard or Performance Overlay flyout
+                    // first if either is up, otherwise toggles the bar
+                    // itself both ways. Menu/Back keeps its natural system
+                    // behavior (dismiss back Home) instead; see
+                    // VideoSurfaceView.pressesBegan.
+                    onMenu: {
+                        if showKeyboard {
+                            showKeyboard = false
+                        } else if showPerformanceFlyout {
+                            showPerformanceFlyout = false
+                        } else {
+                            showOverlay.toggle()
+                        }
+                    },
                     pointerMode: pointerMode,
                     onPointerPosition: { localCursor = $0 },
                     // Pointer coordinates are in the REMOTE desktop's pixels, so
@@ -192,46 +192,19 @@ struct StreamView: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
-            // "Back to Menu" leaves the session alone (see leaveWithoutDisconnecting);
-            // every other way this view goes away — Disconnect, an error's
-            // Close button, a failed/disconnected status screen — tears the
-            // local connection down as before.
-            if !leaveWithoutDisconnecting {
-                controller.disconnect()
-            }
-        }
-        // CONFIRMED against Apple's Game Controller Programming Guide: this
-        // only handles CLOSING the bar (see the .streaming case's final
-        // else branch) — OPENING it is VideoSurfaceView.pressesBegan's job,
-        // not this. While just playing, controllerUserInteractionEnabled is
-        // false, so Menu/Back is routed to whichever view is first
-        // responder (the video view) via pressesBegan, bypassing the
-        // standard focus system entirely — .onExitCommand does not fire in
-        // that state at all, regardless of where it's mounted. Once the bar
-        // is open, controllerUserInteractionEnabled flips true and focus
-        // moves to a real SwiftUI Button, so standard interaction (and this
-        // onExitCommand) takes over for closing/collapsing.
-        //
-        // Mounted unconditionally (not nested inside topBarOverlay) purely
-        // so this still applies during the queue/connect screen too (see
-        // the `default` case below, which uses it as Cancel).
-        .onExitCommand {
-            switch controller.state {
-            case .streaming:
-                if showKeyboard {
-                    showKeyboard = false
-                } else if showPerformanceFlyout {
-                    showPerformanceFlyout = false
-                } else if showMoreOptions {
-                    showMoreOptions = false
-                } else {
-                    showOverlay.toggle()
-                }
-            default:
-                // Queue/connect screen: Menu acts as Cancel, same as the
-                // Cancel button, instead of doing nothing.
-                onDismiss()
-            }
+            // Always tears down THIS device's local WebRTC/control-socket
+            // connection — but that's all disconnect() does (see
+            // StreamController.disconnect()); there's no confirmed REST
+            // call to end the actual cloud session (BoosteroidClient.
+            // stopSession is an unimplemented stub, never called from here),
+            // so the game keeps running server-side regardless of how this
+            // view goes away. That's what makes Back's natural "dismiss back
+            // Home" behavior safe to leave alone (see
+            // VideoSurfaceView.pressesBegan): it doesn't end the session,
+            // it just closes this device's connection to it, and reopening
+            // the game from Home resumes it via the existing "still
+            // running" queue/session flow instead of queuing fresh.
+            controller.disconnect()
         }
     }
 
@@ -332,11 +305,14 @@ struct StreamView: View {
     //
     // Design: a slim HUD bar pinned to the top of the screen (game still
     // visible underneath), not a full-screen pause modal — Disconnect on the
-    // left, Keyboard / Pointer / Steam Overlay / More Options on the right.
-    // The Menu/back remote button opens it; pressing Menu again collapses it
-    // (the More Options panel, if open, collapses first) — see the root
-    // .onExitCommand in body, which owns all of that closing/collapsing
-    // logic so it's active from the very first frame.
+    // left, Keyboard / Pointer / Steam Overlay / Performance Overlay on the
+    // right. Play/Pause opens/closes it (see VideoSurfaceViewRepresentable's
+    // onMenu in body); Menu/Back is deliberately NOT wired to it — it keeps
+    // its natural behavior of dismissing back to Home instead (see
+    // VideoSurfaceView.pressesBegan and the .onDisappear note above), which
+    // is what "Back to Menu" used to do explicitly before it got folded into
+    // Back's own default behavior. No more "More Options" — Performance
+    // Overlay is a top-level pill now that it's the only thing left in it.
 
     private var showStats: Bool { statsOverlayOverride ?? settings.showStatsOverlay }
 
@@ -373,9 +349,9 @@ struct StreamView: View {
                         sendSteamOverlayHotkey()
                         showOverlay = false
                     }
-                    topBarPill("More Options", systemImage: "ellipsis.circle", active: showMoreOptions) {
-                        showMoreOptions.toggle()
-                        if !showMoreOptions { showPerformanceFlyout = false }
+                    topBarPill("Performance Overlay", systemImage: "gauge.with.dots.needle.67percent",
+                               active: showPerformanceFlyout) {
+                        showPerformanceFlyout.toggle()
                     }
                 }
             }
@@ -401,16 +377,10 @@ struct StreamView: View {
             // via the .padding(.horizontal, 32) above.
             .background(Color.black.opacity(0.85).ignoresSafeArea(edges: [.top, .horizontal]))
 
-            if showMoreOptions {
-                HStack(alignment: .top, spacing: 12) {
+            if showPerformanceFlyout {
+                HStack {
                     Spacer()
-                    // Opens to the LEFT of the main panel (matches the
-                    // reference design) — listed first in this HStack, with
-                    // the main panel pinned to the trailing edge after it.
-                    if showPerformanceFlyout {
-                        performanceOverlayFlyout
-                    }
-                    moreOptionsPanel
+                    performanceOverlayFlyout
                 }
                 .padding(.trailing, 32)
                 .padding(.top, 8)
@@ -418,11 +388,6 @@ struct StreamView: View {
 
             Spacer()
         }
-        // Closing/collapsing is handled by the root .onExitCommand (see
-        // body) — it needs to be mounted unconditionally, not nested here,
-        // or the very first Menu press (before this view exists) falls
-        // through to the system's default "dismiss the fullScreenCover"
-        // instead of our own logic.
     }
 
     @ViewBuilder
@@ -439,75 +404,16 @@ struct StreamView: View {
         .tint(active ? .white : .gray)
     }
 
-    /// A smaller, fixed font for the More Options / flyout rows — the
-    /// system's default tvOS button text is large enough that, combined
-    /// with an icon and a chevron, "Performance Overlay" wrapped down to one
-    /// character per line inside the panel's width. Sizing text explicitly
-    /// (rather than relying on the default) keeps these compact HUD rows on
+    /// A smaller, fixed font for the flyout rows — the system's default
+    /// tvOS button text is large enough that "Performance Overlay" (with an
+    /// icon) wrapped down to one character per line at this panel's width
+    /// otherwise. Sizing text explicitly keeps these compact HUD rows on
     /// one line.
     private static let panelRowFont: Font = .system(size: 24, weight: .medium)
 
-    /// "Back to Menu" / "Performance Overlay" (opens its own Enable/Disable
-    /// flyout to the left — see performanceOverlayFlyout) / "Stream Details"
-    /// (placeholder — content still TBD).
-    private var moreOptionsPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Goes back to the Home/games screen WITHOUT disconnecting —
-            // unlike the top-left Disconnect pill, which tears the
-            // connection down. See leaveWithoutDisconnecting's use in
-            // .onDisappear.
-            Button {
-                leaveWithoutDisconnecting = true
-                onDismiss()
-            } label: {
-                Label("Back to Menu", systemImage: "chevron.left")
-                    .font(Self.panelRowFont)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.bordered)
-            .tint(.gray)
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-
-            Divider().background(.white.opacity(0.15)).padding(.horizontal, 12)
-
-            Button {
-                showPerformanceFlyout.toggle()
-            } label: {
-                HStack {
-                    Image(systemName: "gauge.with.dots.needle.67percent")
-                    Text("Performance Overlay")
-                    Spacer()
-                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                }
-                .font(Self.panelRowFont)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.bordered)
-            .tint(showPerformanceFlyout ? .white : .gray)
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-
-            Button {
-                // Stream Details: intentionally empty for now — content TBD.
-            } label: {
-                Label("Stream Details", systemImage: "chart.bar")
-                    .font(Self.panelRowFont)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.bordered)
-            .tint(.gray)
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
-        }
-        .frame(width: 420)
-        .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 16))
-    }
-
-    /// The Performance Overlay row's own nested submenu (Enable/Disable),
-    /// a proper cascading flyout rather than inline buttons — matches the
-    /// reference design, which pops this out to the left of the main panel.
+    /// The Performance Overlay pill's own Enable/Disable flyout — dropping
+    /// down from the pill itself now that "More Options" is gone (it was
+    /// the only thing left in that submenu).
     private var performanceOverlayFlyout: some View {
         VStack(alignment: .leading, spacing: 4) {
             performanceFlyoutRow("Enable", selected: showStats) { statsOverlayOverride = true }

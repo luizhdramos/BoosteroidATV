@@ -198,29 +198,17 @@ final class VideoSurfaceView: UIView {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = false
         for press in presses {
-            if press.type == .menu || press.type == .playPause {
-                // Both OPEN the in-stream bar. CONFIRMED against Apple's own
-                // Game Controller Programming Guide ("Controlling Input on
-                // tvOS"): with controllerUserInteractionEnabled == false
-                // (the default here, while just playing), Menu/Back is
-                // delivered to whichever view is first responder — this
-                // view — via pressesBegan, NOT through the standard
-                // UIKit/SwiftUI focus system. .onExitCommand does NOT
-                // reliably fire in that state at all (it needs the standard
-                // focus system, which this mode bypasses), so relying on it
-                // alone to OPEN the bar (a prior attempt) left Back doing
-                // nothing. The other half of Apple's documented rule: not
-                // calling super.pressesBegan() for a press means UIKit's
-                // default action (e.g. dismissing this presented
-                // fullScreenCover) never fires for it — that's the "handled
-                // = true, no super call" below, and it's what stops Back
-                // from also bouncing back to Home.
-                //
-                // Once the bar is open, StreamingViewController flips
-                // controllerUserInteractionEnabled to true and focus moves
-                // to a real SwiftUI Button — from that point on, standard
-                // interaction IS active, so closing/collapsing is handled
-                // by StreamView's .onExitCommand instead, not here.
+            if press.type == .playPause {
+                // Play/Pause toggles the in-stream bar open/closed — the
+                // ONLY way to reach it now. Menu/Back ("<") is deliberately
+                // left unhandled here (falls through to super below), so it
+                // keeps its natural system behavior of dismissing this
+                // presented fullScreenCover and returning Home — by design,
+                // per feedback: trying to make Back open/close our own bar
+                // never reliably stuck. See StreamView's .onDisappear note:
+                // that natural Back-triggered dismissal is safe precisely
+                // because disconnect() there only tears down THIS device's
+                // local connection, not the actual cloud session.
                 menuPressHandler?()
                 handled = true
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
