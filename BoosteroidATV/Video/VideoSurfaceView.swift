@@ -201,51 +201,33 @@ final class VideoSurfaceView: UIView {
         for press in presses {
             if press.type == .playPause {
                 // Play/Pause toggles the in-stream bar open/closed — the
-                // ONLY way to reach it now. Menu/Back ("<") is deliberately
-                // left unhandled here (falls through to super below), so it
-                // keeps its natural system behavior of dismissing this
-                // presented fullScreenCover and returning Home — by design,
-                // per feedback: trying to make Back open/close our own bar
-                // never reliably stuck. See StreamView's .onDisappear note:
-                // that natural Back-triggered dismissal is safe precisely
-                // because disconnect() there only tears down THIS device's
-                // local connection, not the actual cloud session.
+                // ONLY way to reach it, and (since 2026-08-09) the ONLY way
+                // out of the stream at all — see the .menu case just below
+                // for why Menu/Back can no longer be used for that.
                 menuPressHandler?()
                 handled = true
             } else if press.type == .menu {
-                // CONFIRMED (2026-08-02, reported as "Start e Select não
-                // estão funcionando... antes estava"): tvOS treats a REAL
-                // game controller's own Menu/Start button as an ordinary
-                // system .menu UIPress, exactly like the Siri Remote's own
-                // Back/"<" button — documented Apple behavior, not specific
-                // to this app. Since Menu/Back is deliberately left
-                // unhandled above (falls to super, which dismisses this
-                // presented fullScreenCover), a real controller's Start
-                // button was ALSO silently exiting the stream back to Home.
+                // CONFIRMED 2026-08-09 on a real device (via the MenuBtn/
+                // PollSend/SiriRemote diagnostics in InputSender.pollGamepad):
+                // tvOS funnels a REAL gamepad's own Menu/Start button through
+                // the exact same unified system channel as the Siri Remote's
+                // own Back/"<" button — there is no reliable way, via
+                // GameController polling, valueChangedHandler, or UIPress +
+                // GCController.current, to tell them apart; the OS discards
+                // that distinction before any of these APIs see it. Two
+                // earlier passes (f59bbd6, then b509aef and its revert)
+                // assumed such a distinction was possible and built
+                // increasingly elaborate logic around it — it wasn't, and
+                // that was the actual bug.
                 //
-                // Swallowing it here is enough — CONFIRMED 2026-08-09 on a
-                // real device: InputSender's ~60Hz pollGamepad already
-                // forwards this same button to the game independently, by
-                // reading GCExtendedGamepad.buttonMenu.isPressed directly
-                // (see its isSiriRemote guard there). An earlier pass
-                // (b509aef) assumed that poll could never see this button
-                // while controllerUserInteractionEnabled == false and added
-                // a whole separate explicit-send path here instead — that
-                // assumption was wrong and the extra path actually broke
-                // Start (confirmed working before it, at e16737e). Reverted
-                // to just consuming the UIPress so it doesn't dismiss the
-                // stream; the actual button-7 send is entirely pollGamepad's
-                // job, unchanged.
-                //
-                // Only the Siri Remote should get the natural dismiss-to-
-                // Home behavior; GCController.current is set to whichever
-                // controller most recently produced input, which at this
-                // exact moment is the one that sent THIS press (same
-                // technique InputSender.pollGamepad uses to tell them apart).
-                let isSiriRemote = GCController.current?.microGamepad != nil
-                if !isSiriRemote {
-                    handled = true
-                }
+                // Given that hard platform constraint, asked the user to
+                // pick a priority: they chose Start reaching the game over
+                // Back auto-dismissing to Home. So this now swallows EVERY
+                // .menu press unconditionally (no dismiss-to-Home from Menu/
+                // Back at all anymore, from either device) — button 7 is
+                // sent unconditionally from InputSender.pollGamepad instead,
+                // completely independent of this UIPress plumbing.
+                handled = true
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
                 inputHandler?.sendKeyEvent(
                     down: true,

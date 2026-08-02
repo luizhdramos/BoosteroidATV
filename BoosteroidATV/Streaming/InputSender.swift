@@ -335,8 +335,7 @@ final class InputSender: InputEventHandler {
         // The Siri Remote reports only a microGamepad profile — GameController
         // synthesizes an extendedGamepad on top of it purely so apps that only
         // handle extendedGamepad still work, which is why `pad` (and its
-        // buttonMenu) is non-nil for it too. A REAL physical controller never
-        // exposes microGamepad. Used below to tell the two apart.
+        // buttonMenu) is non-nil for it too.
         let isSiriRemote = controller.microGamepad != nil
         lastPolledControllerIsSiriRemote = isSiriRemote
 
@@ -346,23 +345,27 @@ final class InputSender: InputEventHandler {
             (2, pad.buttonX.isPressed), (3, pad.buttonY.isPressed),
             (4, pad.leftShoulder.isPressed), (5, pad.rightShoulder.isPressed),
             (6, pad.buttonOptions?.isPressed ?? false),
-            // CONFIRMED on a real device (2026-08-09): GCExtendedGamepad.
-            // buttonMenu.isPressed keeps updating via this poll even with
-            // controllerUserInteractionEnabled == false — an earlier pass
-            // (b509aef) assumed otherwise (that the OS redirecting Menu/
-            // Start to a system .menu UIPress meant this could never fire)
-            // and moved button 7 to an explicit UIPress-driven send instead;
-            // that assumption was never actually verified on hardware and
-            // turned out wrong — it broke Start, which had been working
-            // fine here before that change (confirmed against e16737e,
-            // several commits before any of this Menu-button handling
-            // existed). Reverted to this simple, working poll. The Siri
-            // Remote's OWN Back/"<" button is still excluded (isSiriRemote
-            // ? false : ...) since that one really is claimed exclusively
-            // by this app's own bar (VideoSurfaceView.pressesBegan) — a
-            // real controller's Menu/Guide button is unrelated and keeps
-            // reaching the game normally as this polled button.
-            (7, isSiriRemote ? false : pad.buttonMenu.isPressed),
+            // CONFIRMED on a real device (2026-08-09, via the MenuBtn/
+            // PollSend/SiriRemote diagnostics added for exactly this):
+            // pressing Start on a REAL gamepad reported SiriRemote = true
+            // and PollSend never moved — i.e. tvOS funnels a real
+            // controller's own Menu/Start button through the SAME unified
+            // system channel as the Siri Remote's own Back/"<" button
+            // (GCController.microGamepad != nil on whichever object the OS
+            // delivers it through), not through that controller's own
+            // extendedGamepad profile. This is a hard platform limitation,
+            // not a bug we can route around: there is NO reliable way, via
+            // GameController polling, valueChangedHandler, or UIPress +
+            // GCController.current, to tell "the Remote's own Back button"
+            // apart from "a real gamepad's Start button" — the OS discards
+            // that distinction before any of these APIs see it. Asked the
+            // user to pick a priority given that hard constraint: they chose
+            // Start reaching the game over Back auto-dismissing to Home
+            // (see VideoSurfaceView.pressesBegan, which now swallows EVERY
+            // Menu press instead of only real controllers'). So button 7 is
+            // now sent unconditionally — accepting that the Remote's own
+            // Back button will also send a Start press to the game.
+            (7, pad.buttonMenu.isPressed),
             (8, pad.leftThumbstickButton?.isPressed ?? false),
             (9, pad.rightThumbstickButton?.isPressed ?? false),
         ]

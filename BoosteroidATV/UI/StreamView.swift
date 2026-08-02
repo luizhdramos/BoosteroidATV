@@ -210,17 +210,20 @@ struct StreamView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             // Always tears down THIS device's local WebRTC/control-socket
-            // connection — but that's all disconnect() does (see
-            // StreamController.disconnect()); there's no confirmed REST
-            // call to end the actual cloud session (BoosteroidClient.
-            // stopSession is an unimplemented stub, never called from here),
-            // so the game keeps running server-side regardless of how this
-            // view goes away. That's what makes Back's natural "dismiss back
-            // Home" behavior safe to leave alone (see
-            // VideoSurfaceView.pressesBegan): it doesn't end the session,
-            // it just closes this device's connection to it, and reopening
-            // the game from Home resumes it via the existing "still
-            // running" queue/session flow instead of queuing fresh.
+            // connection (StreamController.disconnect()) — the actual cloud
+            // session is only ended explicitly via the Disconnect button
+            // (see topBarOverlay, which calls terminateSession() first). So
+            // if this view goes away any other way, the game keeps running
+            // server-side, and reopening it from Home resumes it via the
+            // existing "still running" queue/session flow instead of
+            // queuing fresh.
+            //
+            // NOTE 2026-08-09: Menu/Back no longer dismisses this view at
+            // all — see VideoSurfaceView.pressesBegan's .menu handling for
+            // why (tvOS can't tell a real gamepad's Start button apart from
+            // the Siri Remote's own Back button, and the user chose to
+            // prioritize Start reaching the game). The only way out now is
+            // Play/Pause -> Disconnect in the top bar.
             controller.disconnect()
         }
         // Handles Play/Pause while the bar is OPEN. VideoSurfaceView's
@@ -358,12 +361,14 @@ struct StreamView: View {
     // visible underneath), not a full-screen pause modal — Disconnect on the
     // left, Keyboard / Pointer / Steam Overlay / Performance Overlay on the
     // right. Play/Pause opens/closes it (see VideoSurfaceViewRepresentable's
-    // onMenu in body); Menu/Back is deliberately NOT wired to it — it keeps
-    // its natural behavior of dismissing back to Home instead (see
-    // VideoSurfaceView.pressesBegan and the .onDisappear note above), which
-    // is what "Back to Menu" used to do explicitly before it got folded into
-    // Back's own default behavior. No more "More Options" — Performance
-    // Overlay is a top-level pill now that it's the only thing left in it.
+    // onMenu in body). Menu/Back is NOT wired to it and no longer dismisses
+    // to Home either (see VideoSurfaceView.pressesBegan's .menu handling and
+    // the .onDisappear note above) — tvOS can't tell a real gamepad's Start
+    // button apart from the Siri Remote's own Back button, and the user
+    // chose to prioritize Start reaching the game, so Menu/Back is now a
+    // no-op here on purpose. Disconnect (via Play/Pause -> this bar) is the
+    // only way out. No more "More Options" — Performance Overlay is a
+    // top-level pill now that it's the only thing left in it.
 
     private var showStats: Bool { statsOverlayOverride ?? settings.showStatsOverlay }
 
