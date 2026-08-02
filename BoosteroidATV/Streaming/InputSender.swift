@@ -62,6 +62,25 @@ final class InputSender: InputEventHandler {
     /// nil means we're running on the provisional (index) id — input still
     /// flows, this just tells us whether the server handshake completed.
     private(set) var lastServerAckId: String?
+    /// DIAGNOSTIC (added 2026-08-09): total `{"type":"controller","action":
+    /// "rumble",...}` messages received from the server this session. If
+    /// this stays at 0 no matter what happens in-game, the server simply
+    /// never sent a rumble event for this game/session — nothing on this
+    /// client's end could fix that, since applyRumble is never even called.
+    private(set) var rumbleMessagesReceived = 0
+    private(set) var rumbleLastLeft: Double = 0
+    private(set) var rumbleLastRight: Double = 0
+    /// DIAGNOSTIC: nil until the first nonzero rumble is actually attempted
+    /// (see applyRumble — haptics setup is lazy). Once set: `false` means
+    /// `GCController.haptics` was nil for this controller, i.e. GameController
+    /// reports it doesn't support haptics on this device at all — no amount
+    /// of CoreHaptics code here can fix that; `true` means haptics setup was
+    /// attempted (see rumbleSetupError for whether it actually succeeded).
+    private(set) var rumbleHapticsAvailable: Bool?
+    /// DIAGNOSTIC: set if CHHapticEngine/pattern/player setup threw, so a
+    /// silent failure (the old code just returned nil) is visible instead of
+    /// looking identical to "never tried".
+    private(set) var rumbleSetupError: String?
 
     // Per-controller server-assigned ids (CONFIRMED required before the
     // server accepts button/axes/pad events for that controller — see
@@ -160,6 +179,9 @@ final class InputSender: InputEventHandler {
                 pendingControllerNames.removeValue(forKey: key)
             }
         case .controllerRumble(let id, let left, let right):
+            rumbleMessagesReceived += 1
+            rumbleLastLeft = left
+            rumbleLastRight = right
             applyRumble(id: id, left: left, right: right)
         case .webrtcEngineReady, .sessionActive, .cursor, .raw, .closed, .failed:
             break // Not input events — StreamController handles engine-start.
@@ -451,17 +473,25 @@ final class InputSender: InputEventHandler {
     private func applyRumble(id: String, left: Double, right: Double) {
         guard let targetId = Int(id),
               let key = controllerIds.first(where: { $0.value == targetId })?.key,
-              let controller = GCController.controllers().first(where: { ObjectIdentifier($0) == key }),
-              let haptics = controller.haptics
+              let controller = GCController.controllers().first(where: { ObjectIdentifier($0) == key })
         else { return }
+        guard let haptics = controller.haptics else {
+            // DIAGNOSTIC: GameController itself says this controller has no
+            // haptics support at all — most likely explanation for "rumble
+            // does nothing" if rumbleMessagesReceived is climbing but
+            // nothing vibrates. Not something CoreHaptics code can route
+            // around; the controller/firmware genuinely doesn't expose it.
+            rumbleHapticsAvailable = false
+            return
+        }
 
         if let existing = hapticsByController[key] {
             existing.update(left: left, right: right)
             return
         }
-        guard left > 0 || right > 0,
-              let created = Self.makeControllerHaptics(haptics: haptics)
-        else { return }
+        guard left > 0 || right > 0 else { return }
+        rumbleHapticsAvailable = true
+        guard let created = makeControllerHaptics(haptics: haptics) else { return }
         hapticsByController[key] = created
         created.update(left: left, right: right)
     }
@@ -470,7 +500,7 @@ final class InputSender: InputEventHandler {
     /// reports both localities (CONFIRMED available on DualSense/DualShock
     /// via GCDeviceHaptics.supportedLocalities); otherwise falls back to one
     /// shared `.default` channel.
-    private static func makeControllerHaptics(haptics: GCDeviceHaptics) -> ControllerHaptics? {
+    private func makeControllerHaptics(haptics: GCDeviceHaptics) -> ControllerHaptics? {
         let supported = haptics.supportedLocalities
         if supported.contains(.leftHandle), supported.contains(.rightHandle) {
             let left = makeChannel(haptics: haptics, locality: .leftHandle)
@@ -487,8 +517,11 @@ final class InputSender: InputEventHandler {
     /// HapticChannel.setIntensity's live sendParameters calls, so this
     /// initial pattern is just a "holder" the loop plays, never heard at its
     /// own 0-intensity value.
-    private static func makeChannel(haptics: GCDeviceHaptics, locality: GCHapticsLocality) -> HapticChannel? {
-        guard let engine = haptics.createEngine(withLocality: locality) else { return nil }
+    private func makeChannel(haptics: GCDeviceHaptics, locality: GCHapticsLocality) -> HapticChannel? {
+        guard let engine = haptics.createEngine(withLocality: locality) else {
+            rumbleSetupError = "createEngine(withLocality: \(locality)) returned nil"
+            return nil
+        }
         do {
             try engine.start()
             let event = CHHapticEvent(
@@ -507,6 +540,7 @@ final class InputSender: InputEventHandler {
             try player.start(atTime: CHHapticTimeImmediate)
             return HapticChannel(engine: engine, player: player)
         } catch {
+            rumbleSetupError = error.localizedDescription
             return nil
         }
     }

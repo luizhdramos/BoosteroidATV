@@ -79,6 +79,12 @@ final class StreamController: NSObject {
     private(set) var controllerCount = 0
     private(set) var controllerEventsSent = 0
     private(set) var controllerAckId: String = "-"
+    /// DIAGNOSTIC (added 2026-08-09) — see InputSender's matching properties'
+    /// doc comments. Mirrored here purely to get them onto the Performance
+    /// Overlay while chasing down why rumble doesn't do anything.
+    private(set) var rumbleMessagesReceived = 0
+    private(set) var rumbleHapticsAvailable: Bool?
+    private(set) var rumbleSetupError: String?
     /// Cursor position reported by the server, in remote-desktop pixels.
     /// nil until (or unless) the server sends one — see the `.cursor` note in
     /// BoosteroidControlChannel.
@@ -524,6 +530,9 @@ final class StreamController: NSObject {
                     self.controllerCount = sender.connectedControllerCount
                     self.controllerEventsSent = sender.controllerEventsSent
                     self.controllerAckId = sender.lastServerAckId ?? "none(provisional)"
+                    self.rumbleMessagesReceived = sender.rumbleMessagesReceived
+                    self.rumbleHapticsAvailable = sender.rumbleHapticsAvailable
+                    self.rumbleSetupError = sender.rumbleSetupError
                 }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

@@ -319,6 +319,17 @@ struct StreamView: View {
         let mbps = Double(controller.stats.bitrateKbps) / 1000
         var line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps | Stream FPS: \(controller.streamFps) | Latency: \(controller.rttMs)ms"
         if let connectedServerName { line += " | Server: \(connectedServerName)" }
+        // DIAGNOSTIC (added 2026-08-09, same approach as the Start-button
+        // investigation): narrows down where rumble is failing.
+        // - RumbleRecv stuck at 0: the server never sent a rumble event for
+        //   this game/session — nothing client-side can fix that.
+        // - RumbleRecv climbing but Haptics shows "no": GameController says
+        //   this controller doesn't support haptics at all.
+        // - Haptics "yes" but RumbleErr non-empty: CoreHaptics setup itself
+        //   threw — the message is the actual SDK error.
+        line += " | RumbleRecv: \(controller.rumbleMessagesReceived)"
+        line += " | Haptics: \(controller.rumbleHapticsAvailable.map { $0 ? "yes" : "no" } ?? "?")"
+        if let rumbleSetupError = controller.rumbleSetupError { line += " | RumbleErr: \(rumbleSetupError)" }
         // Video and input ride entirely separate connections — the control
         // channel can silently die (network blip, server timeout) while video
         // keeps playing perfectly, leaving mouse/keyboard/controller dead with
