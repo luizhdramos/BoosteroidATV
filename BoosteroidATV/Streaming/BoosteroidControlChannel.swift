@@ -115,8 +115,10 @@ import Foundation
 //     down+right=6), and hat=0 is sent on release. NOT a POV-hat rotation
 //     number. `id` is a NUMBER on the wire (not a string).
 //   controller rumble (SERVER -> client): {type:"controller",
-//     action:"rumble", id, left, right} — documented for completeness;
-//     not wired to any vibration API on this client yet.
+//     action:"rumble", id, left, right} — `left`/`right` are 0...1
+//     intensities, matching the browser Gamepad API's dual-rumble effect
+//     this mirrors. Forwarded to the real controller via GameController's
+//     CoreHaptics bridge — see InputSender.applyRumble.
 //
 // NOT implemented: locked/relative-in-pointer-lock cursor mode (only plain
 // relative and absolute are used), and exact diagonal D-pad hat values — both

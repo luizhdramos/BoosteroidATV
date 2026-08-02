@@ -1,3 +1,4 @@
+import CoreHaptics
 import Foundation
 import GameController
 
@@ -75,6 +76,10 @@ final class InputSender: InputEventHandler {
     // every outgoing frame serializes `id` as a number.
     private var controllerIds: [ObjectIdentifier: Int] = [:]
     private var pendingControllerNames: [ObjectIdentifier: String] = [:]
+    /// One CoreHaptics rig per controller that's actually rumbled at least
+    /// once — see applyRumble's doc comment for why this is lazy and
+    /// per-controller rather than set up at connect time.
+    private var hapticsByController: [ObjectIdentifier: ControllerHaptics] = [:]
 
     // Change-detection state, mirroring the real web client's diffing (only
     // send an event when something actually changed) rather than flooding
@@ -136,6 +141,8 @@ final class InputSender: InputEventHandler {
         if let disconnectObserver { NotificationCenter.default.removeObserver(disconnectObserver) }
         connectObserver = nil
         disconnectObserver = nil
+        for haptics in hapticsByController.values { haptics.stop() }
+        hapticsByController.removeAll()
     }
 
     /// Fed by StreamController as it consumes BoosteroidControlChannel's
@@ -152,9 +159,10 @@ final class InputSender: InputEventHandler {
                 controllerIds[key] = Int(id) ?? controllerIds[key]
                 pendingControllerNames.removeValue(forKey: key)
             }
-        case .webrtcEngineReady, .sessionActive, .controllerRumble, .cursor, .raw, .closed, .failed:
-            break // Not input events (StreamController handles engine-start /
-                  // rumble not wired to a vibration API yet).
+        case .controllerRumble(let id, let left, let right):
+            applyRumble(id: id, left: left, right: right)
+        case .webrtcEngineReady, .sessionActive, .cursor, .raw, .closed, .failed:
+            break // Not input events — StreamController handles engine-start.
         }
     }
 
@@ -257,6 +265,7 @@ final class InputSender: InputEventHandler {
         lastButtonState.removeValue(forKey: key)
         lastAxisState.removeValue(forKey: key)
         lastHat.removeValue(forKey: key)
+        if let haptics = hapticsByController.removeValue(forKey: key) { haptics.stop() }
         connectedControllerCount = GCController.controllers().count
     }
 
@@ -378,5 +387,133 @@ final class InputSender: InputEventHandler {
 
     private func applyDeadzone(_ value: Float) -> Float {
         abs(value) < deadzone ? 0 : value
+    }
+
+    // MARK: - Controller Rumble
+    //
+    // CONFIRMED (see BoosteroidControlChannel's header): the server pushes
+    // {"type":"controller","action":"rumble", id, left, right} whenever the
+    // streamed game rumbles the gamepad, `left`/`right` each 0...1. Real
+    // vibration on tvOS ONLY comes through GameController's CoreHaptics
+    // bridge (GCController.haptics) — there's no simple "set rumble" call.
+    // CHHapticEngine has real per-event startup latency, far too slow to
+    // build and play a brand-new pattern for every rumble update (these can
+    // arrive many times a second while a game rumbles continuously), so
+    // instead one looping CHHapticContinuous player per motor is created
+    // ONCE per controller and its intensity is nudged live via
+    // sendParameters — the same technique Apple's own GameController haptics
+    // sample code uses for continuous, variable-intensity feedback.
+
+    /// One CoreHaptics engine + looping player pinned to a single haptics
+    /// locality (e.g. the left or right rumble motor).
+    private struct HapticChannel {
+        let engine: CHHapticEngine
+        let player: CHHapticAdvancedPatternPlayer
+
+        func setIntensity(_ value: Double) {
+            let clamped = Float(min(max(value, 0), 1))
+            let param = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: clamped, relativeTime: 0)
+            try? player.sendParameters([param], atTime: CHHapticTimeImmediate)
+        }
+
+        func stop() {
+            try? player.stop(atTime: CHHapticTimeImmediate)
+            engine.stop()
+        }
+    }
+
+    /// Either a genuinely separate left/right pair (controllers like
+    /// DualSense/DualShock that report distinct rumble motor localities) or
+    /// one shared channel driven by max(left, right) for controllers that
+    /// only expose a single, undifferentiated rumble motor (most Xbox-style
+    /// pads via GameController's `.default` locality).
+    private struct ControllerHaptics {
+        var left: HapticChannel?
+        var right: HapticChannel?
+        var combined: HapticChannel?
+
+        func update(left leftValue: Double, right rightValue: Double) {
+            if left != nil || right != nil {
+                left?.setIntensity(leftValue)
+                right?.setIntensity(rightValue)
+            } else {
+                combined?.setIntensity(max(leftValue, rightValue))
+            }
+        }
+
+        func stop() {
+            left?.stop()
+            right?.stop()
+            combined?.stop()
+        }
+    }
+
+    /// Server -> client rumble handler. Looks the wire `id` back up to the
+    /// real GCController (via the same controllerIds map outgoing input
+    /// uses), then lazily builds this controller's haptics rig on the FIRST
+    /// nonzero rumble rather than at connect time — most sessions never
+    /// rumble at all, and CHHapticEngine has real overhead not worth paying
+    /// up front for every connected controller.
+    private func applyRumble(id: String, left: Double, right: Double) {
+        guard let targetId = Int(id),
+              let key = controllerIds.first(where: { $0.value == targetId })?.key,
+              let controller = GCController.controllers().first(where: { ObjectIdentifier($0) == key }),
+              let haptics = controller.haptics
+        else { return }
+
+        if let existing = hapticsByController[key] {
+            existing.update(left: left, right: right)
+            return
+        }
+        guard left > 0 || right > 0,
+              let created = Self.makeControllerHaptics(haptics: haptics)
+        else { return }
+        hapticsByController[key] = created
+        created.update(left: left, right: right)
+    }
+
+    /// Prefers distinct left/right motor channels when the controller
+    /// reports both localities (CONFIRMED available on DualSense/DualShock
+    /// via GCDeviceHaptics.supportedLocalities); otherwise falls back to one
+    /// shared `.default` channel.
+    private static func makeControllerHaptics(haptics: GCDeviceHaptics) -> ControllerHaptics? {
+        let supported = haptics.supportedLocalities
+        if supported.contains(.leftHandle), supported.contains(.rightHandle) {
+            let left = makeChannel(haptics: haptics, locality: .leftHandle)
+            let right = makeChannel(haptics: haptics, locality: .rightHandle)
+            guard left != nil || right != nil else { return nil }
+            return ControllerHaptics(left: left, right: right, combined: nil)
+        }
+        guard let combined = makeChannel(haptics: haptics, locality: .default) else { return nil }
+        return ControllerHaptics(left: nil, right: nil, combined: combined)
+    }
+
+    /// One engine + a 1-second continuous event looped forever (`loopEnabled`)
+    /// starting at zero intensity — intensity is then driven entirely via
+    /// HapticChannel.setIntensity's live sendParameters calls, so this
+    /// initial pattern is just a "holder" the loop plays, never heard at its
+    /// own 0-intensity value.
+    private static func makeChannel(haptics: GCDeviceHaptics, locality: GCHapticsLocality) -> HapticChannel? {
+        guard let engine = haptics.createEngine(withLocality: locality) else { return nil }
+        do {
+            try engine.start()
+            let event = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5),
+                ],
+                relativeTime: 0,
+                duration: 1
+            )
+            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            let player = try engine.makeAdvancedPlayer(with: pattern)
+            player.loopEnabled = true
+            player.loopEnd = 1
+            try player.start(atTime: CHHapticTimeImmediate)
+            return HapticChannel(engine: engine, player: player)
+        } catch {
+            return nil
+        }
     }
 }
