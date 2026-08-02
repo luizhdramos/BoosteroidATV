@@ -206,6 +206,27 @@ struct StreamView: View {
             // running" queue/session flow instead of queuing fresh.
             controller.disconnect()
         }
+        // Handles Play/Pause while the bar is OPEN. VideoSurfaceView's
+        // pressesBegan only fires while the raw video view itself has
+        // focus/first-responder status — true before the bar opens
+        // (controllerUserInteractionEnabled == false), but once it's open,
+        // that flips to true and focus moves onto one of the bar's own
+        // SwiftUI Buttons. A focused Button doesn't do anything with a
+        // Play/Pause press on its own (it's not Select or Menu), so without
+        // this, pressing Play/Pause after navigating onto any button did
+        // nothing — matching the reported "works until something's
+        // selected." .onPlayPauseCommand is SwiftUI's tvOS-focus-system
+        // counterpart to pressesBegan's raw-input path, so together they
+        // cover both states.
+        .onPlayPauseCommand {
+            if showKeyboard {
+                showKeyboard = false
+            } else if showPerformanceFlyout {
+                showPerformanceFlyout = false
+            } else {
+                showOverlay.toggle()
+            }
+        }
     }
 
     /// A drawn pointer for pointer mode.
