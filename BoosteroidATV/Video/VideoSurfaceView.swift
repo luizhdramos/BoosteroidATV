@@ -1,6 +1,7 @@
 // NOTE: Requires WebRTC SPM package (https://github.com/livekit/webrtc-xcframework)
 
 import AVFoundation
+import GameController
 import UIKit
 import LiveKitWebRTC
 
@@ -211,6 +212,35 @@ final class VideoSurfaceView: UIView {
                 // local connection, not the actual cloud session.
                 menuPressHandler?()
                 handled = true
+            } else if press.type == .menu {
+                // CONFIRMED regression (2026-08-02, reported as "Start e
+                // Select não estão funcionando... antes estava"): tvOS
+                // treats a REAL game controller's own Menu/Start button as
+                // an ordinary system .menu UIPress, exactly like the Siri
+                // Remote's own Back/"<" button — this is documented Apple
+                // behavior, not specific to this app. Since Menu/Back is
+                // deliberately left unhandled above (falls to super, which
+                // dismisses this presented fullScreenCover), pressing a
+                // real controller's Start button was ALSO silently exiting
+                // the stream back to Home instead of reaching the game as a
+                // Start press — it never even got a chance to reach
+                // InputSender's own ~60Hz GCExtendedGamepad polling
+                // (pollGamepad), which is what actually forwards Start/
+                // Select to the game and is completely independent of this
+                // UIPress plumbing. Only the Siri Remote should get the
+                // natural dismiss-to-Home behavior; GCController.current is
+                // set to whichever controller most recently produced
+                // input, which at this exact moment is the one that sent
+                // THIS press (same technique InputSender.pollGamepad
+                // already uses to tell them apart).
+                let isSiriRemote = GCController.current?.microGamepad != nil
+                if !isSiriRemote {
+                    // Swallow it: don't dismiss, don't toggle our own bar
+                    // either — just let it register as a normal button
+                    // press/release on the controller, same as any other
+                    // gamepad button.
+                    handled = true
+                }
             } else if let key = press.key, let mapping = Self.hidToKeyMapping[key.keyCode] {
                 inputHandler?.sendKeyEvent(
                     down: true,
@@ -423,8 +453,6 @@ private final class WebRTCFrameRenderer: NSObject, LKRTCVideoRenderer {
 }
 
 // MARK: - Streaming View Controller
-
-import GameController
 
 final class StreamingViewController: GCEventViewController {
     let videoSurface = VideoSurfaceView()
