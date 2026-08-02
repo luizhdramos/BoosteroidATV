@@ -330,6 +330,15 @@ struct StreamView: View {
         line += " | RumbleRecv: \(controller.rumbleMessagesReceived)"
         line += " | Haptics: \(controller.rumbleHapticsAvailable.map { $0 ? "yes" : "no" } ?? "?")"
         if let rumbleSetupError = controller.rumbleSetupError { line += " | RumbleErr: \(rumbleSetupError)" }
+        // DIAGNOSTIC round 2 (2026-08-09): setup now succeeds with no error
+        // but nothing physically vibrates. LR shows the actual left/right
+        // magnitudes the server is sending (rules out "values are ~0" even
+        // though messages are arriving), and Localities shows which
+        // GCHapticsLocality this specific controller reports supporting
+        // (rules out "we created an engine for a locality with no real
+        // motor behind it" — see InputSender.makeControllerHaptics).
+        line += " | RumbleLR: \(String(format: "%.2f", controller.rumbleLastLeft))/\(String(format: "%.2f", controller.rumbleLastRight))"
+        line += " | Localities: \(controller.rumbleSupportedLocalities)"
         // Video and input ride entirely separate connections — the control
         // channel can silently die (network blip, server timeout) while video
         // keeps playing perfectly, leaving mouse/keyboard/controller dead with

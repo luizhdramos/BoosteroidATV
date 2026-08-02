@@ -81,6 +81,15 @@ final class InputSender: InputEventHandler {
     /// silent failure (the old code just returned nil) is visible instead of
     /// looking identical to "never tried".
     private(set) var rumbleSetupError: String?
+    /// DIAGNOSTIC (added 2026-08-09, round 2 — setup now succeeds with no
+    /// error but nothing physically vibrates): `GCDeviceHaptics.
+    /// supportedLocalities` for whichever controller last rumbled, captured
+    /// at setup time. Rules in/out "we're playing on a locality this
+    /// specific controller doesn't actually back with a real motor" — e.g.
+    /// if this never contains `.default`, engine.createEngine(withLocality:
+    /// .default) may have silently created a channel that plays into
+    /// nothing.
+    private(set) var rumbleSupportedLocalities: String = "-"
 
     // Per-controller server-assigned ids (CONFIRMED required before the
     // server accepts button/axes/pad events for that controller — see
@@ -519,13 +528,21 @@ final class InputSender: InputEventHandler {
     /// shared `.default` channel.
     private func makeControllerHaptics(haptics: GCDeviceHaptics) -> ControllerHaptics? {
         let supported = haptics.supportedLocalities
+        rumbleSupportedLocalities = supported.isEmpty ? "(empty)" : supported.map { "\($0.rawValue)" }.sorted().joined(separator: ", ")
         if supported.contains(.leftHandle), supported.contains(.rightHandle) {
             let left = makeChannel(haptics: haptics, locality: .leftHandle)
             let right = makeChannel(haptics: haptics, locality: .rightHandle)
             guard left != nil || right != nil else { return nil }
             return ControllerHaptics(left: left, right: right, combined: nil)
         }
-        guard let combined = makeChannel(haptics: haptics, locality: .default) else { return nil }
+        // DIAGNOSTIC round 2 (2026-08-09): prefer `.all` over `.default` when
+        // available — `.default` names one specific actuator, which on some
+        // controllers may not correspond to any real motor even though
+        // engine creation for it succeeds with no error; `.all` is
+        // documented as "every haptic actuator available", the most likely
+        // to actually reach whatever motor(s) this controller has.
+        let locality: GCHapticsLocality = supported.contains(.all) ? .all : .default
+        guard let combined = makeChannel(haptics: haptics, locality: locality) else { return nil }
         return ControllerHaptics(left: nil, right: nil, combined: combined)
     }
 
