@@ -62,36 +62,6 @@ final class InputSender: InputEventHandler {
     /// nil means we're running on the provisional (index) id — input still
     /// flows, this just tells us whether the server handshake completed.
     private(set) var lastServerAckId: String?
-    /// DIAGNOSTIC ONLY (added 2026-08-09): counts every time GameController's
-    /// OWN buttonMenu.valueChangedHandler fires, completely independent of
-    /// both pollGamepad's read of buttonMenu.isPressed AND
-    /// VideoSurfaceView's pressesBegan/.menu UIPress handling. Two guesses
-    /// about whether/how this button reaches us in a row have turned out
-    /// wrong on real hardware (b509aef, then its revert) — this exists so
-    /// the NEXT attempt is based on what actually happens on a real device
-    /// instead of a third guess. Surfaced in the Performance Overlay as
-    /// "MenuBtn". If this stays at 0 no matter how many times Start/Select
-    /// is pressed, GameController's handler-based API for this button is
-    /// genuinely dead in this input mode, full stop — no amount of
-    /// poll-vs-UIPress rearranging will fix it, and the only way to reach
-    /// the game from that button might be entirely UIPress-driven (which
-    /// still failed once already — see b509aef's revert — so THAT would
-    /// need its own real bug fix, not just resurrecting it as-is).
-    private(set) var menuButtonHandlerFireCount = 0
-    private(set) var menuButtonHandlerLastPressed = false
-    /// DIAGNOSTIC ONLY: what pollGamepad's OWN read of button 7 actually saw,
-    /// each tick, for whichever controller polled last — lets us tell apart
-    /// "the send pipeline never even tries" (this stays 0) from "it sends,
-    /// but something after that drops it" (this moves in lockstep with
-    /// menuButtonHandlerFireCount above, which is driven by a totally
-    /// separate GameController API).
-    private(set) var menuButtonPollSendCount = 0
-    /// DIAGNOSTIC ONLY: `controller.microGamepad != nil` as read by
-    /// pollGamepad for whichever controller polled last — if this is
-    /// unexpectedly `true` for a REAL controller, that alone would explain
-    /// button 7 never being sent (isSiriRemote forces it to `false`
-    /// regardless of the actual press).
-    private(set) var lastPolledControllerIsSiriRemote = false
 
     // Per-controller server-assigned ids (CONFIRMED required before the
     // server accepts button/axes/pad events for that controller — see
@@ -282,17 +252,6 @@ final class InputSender: InputEventHandler {
         controllerIds[key] = index
         connectedControllerCount = GCController.controllers().count
 
-        // DIAGNOSTIC ONLY — see menuButtonHandlerFireCount's doc comment.
-        // GCController's handlerQueue defaults to the main queue, but hop
-        // explicitly anyway since that default is easy to get wrong; this
-        // class is @MainActor and every other mutation assumes it.
-        controller.extendedGamepad?.buttonMenu.valueChangedHandler = { [weak self] _, _, pressed in
-            DispatchQueue.main.async {
-                self?.menuButtonHandlerFireCount += 1
-                self?.menuButtonHandlerLastPressed = pressed
-            }
-        }
-
         Task { [controlChannel] in await controlChannel.send(type: "controller", action: "connected", fields: ["name": name]) }
     }
 
@@ -332,39 +291,20 @@ final class InputSender: InputEventHandler {
     private func pollGamepad(controller: GCController, id: Int, pad: GCExtendedGamepad) {
         let key = ObjectIdentifier(controller)
 
-        // The Siri Remote reports only a microGamepad profile — GameController
-        // synthesizes an extendedGamepad on top of it purely so apps that only
-        // handle extendedGamepad still work, which is why `pad` (and its
-        // buttonMenu) is non-nil for it too.
-        let isSiriRemote = controller.microGamepad != nil
-        lastPolledControllerIsSiriRemote = isSiriRemote
-
         // Buttons 0-9 — CONFIRMED indices, see BoosteroidControlChannel.
+        // Button 7 (Menu/Start): CONFIRMED 2026-08-09 on a real device that
+        // tvOS funnels a real gamepad's own Menu/Start button through the
+        // exact same unified system channel as the Siri Remote's own
+        // Back/"<" button — there is no reliable way to tell them apart at
+        // this layer (see VideoSurfaceView.pressesBegan's .menu handling for
+        // the full story), so this is sent unconditionally: the Remote's own
+        // Back button now also sends a Start press to the game, a deliberate
+        // trade-off the user chose over Back auto-dismissing to Home.
         let buttons: [(Int, Bool)] = [
             (0, pad.buttonA.isPressed), (1, pad.buttonB.isPressed),
             (2, pad.buttonX.isPressed), (3, pad.buttonY.isPressed),
             (4, pad.leftShoulder.isPressed), (5, pad.rightShoulder.isPressed),
             (6, pad.buttonOptions?.isPressed ?? false),
-            // CONFIRMED on a real device (2026-08-09, via the MenuBtn/
-            // PollSend/SiriRemote diagnostics added for exactly this):
-            // pressing Start on a REAL gamepad reported SiriRemote = true
-            // and PollSend never moved — i.e. tvOS funnels a real
-            // controller's own Menu/Start button through the SAME unified
-            // system channel as the Siri Remote's own Back/"<" button
-            // (GCController.microGamepad != nil on whichever object the OS
-            // delivers it through), not through that controller's own
-            // extendedGamepad profile. This is a hard platform limitation,
-            // not a bug we can route around: there is NO reliable way, via
-            // GameController polling, valueChangedHandler, or UIPress +
-            // GCController.current, to tell "the Remote's own Back button"
-            // apart from "a real gamepad's Start button" — the OS discards
-            // that distinction before any of these APIs see it. Asked the
-            // user to pick a priority given that hard constraint: they chose
-            // Start reaching the game over Back auto-dismissing to Home
-            // (see VideoSurfaceView.pressesBegan, which now swallows EVERY
-            // Menu press instead of only real controllers'). So button 7 is
-            // now sent unconditionally — accepting that the Remote's own
-            // Back button will also send a Start press to the game.
             (7, pad.buttonMenu.isPressed),
             (8, pad.leftThumbstickButton?.isPressed ?? false),
             (9, pad.rightThumbstickButton?.isPressed ?? false),
@@ -374,7 +314,6 @@ final class InputSender: InputEventHandler {
             if buttonState[index] != isPressed {
                 buttonState[index] = isPressed
                 controllerEventsSent += 1
-                if index == 7 { menuButtonPollSendCount += 1 } // DIAGNOSTIC ONLY
                 Task { [controlChannel] in await controlChannel.send(type: "controller", action: "button", fields: [
                     "id": id, "button": index, "value": isPressed ? 1 : 0,
                 ]) }
