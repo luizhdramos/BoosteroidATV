@@ -189,6 +189,13 @@ final class StreamController: NSObject {
         //    this device and is what the server gates media on.
         let (width, height) = Self.parseResolution(settings.resolution)
         let sender = InputSender(controlChannel: controlChannel, surfaceWidth: width, surfaceHeight: height)
+        // BUG FIX (found while writing the open-source README, 2026-08-02):
+        // StreamSettings.controllerDeadzone has had a Settings UI slider
+        // since the app's early days, but nothing ever actually forwarded it
+        // onto InputSender.deadzone (which defaults to a hardcoded 0.15) —
+        // the slider silently did nothing. Wired up here, same pattern as
+        // the rumble settings just below.
+        sender.deadzone = Float(settings.controllerDeadzone)
         sender.rumbleEnabled = settings.rumbleEnabled
         sender.rumbleIntensityMultiplier = settings.rumbleIntensity.multiplier
         inputSender = sender
