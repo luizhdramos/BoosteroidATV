@@ -21,8 +21,7 @@ nonisolated enum BoosteroidAuth {
     static let apiBaseUrl = "https://cloud.boosteroid.com"
 
     /// CONFIRMED 2026-07-27 by capturing the official Android TV client's own
-    /// traffic (Frida SSL-pinning bypass + mitmproxy — see
-    /// tools/android-tv-capture/). This is that app's own embedded
+    /// traffic (Frida SSL-pinning bypass + mitmproxy). This is that app's own embedded
     /// OAuth-style client id/secret pair, identical across every install
     /// (client_id 6) — it is not a per-user secret. Boosteroid's own
     /// "Sign in Manually" screen uses exactly this pair against

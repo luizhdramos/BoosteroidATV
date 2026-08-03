@@ -25,8 +25,8 @@ struct LoginView: View {
     // MARK: Credentials Entry
     //
     // CONFIRMED 2026-07-27/28 by capturing the real Android TV app's traffic
-    // (see tools/android-tv-capture/): a direct email/password login, no
-    // Cloudflare Turnstile challenge involved (that only gates the
+    // (Frida SSL-pinning bypass + mitmproxy): a direct email/password login,
+    // no Cloudflare Turnstile challenge involved (that only gates the
     // browser-facing /auth/login page, not this REST endpoint) — exactly
     // what that app's own "Sign in Manually" screen does.
     private var credentialsEntry: some View {

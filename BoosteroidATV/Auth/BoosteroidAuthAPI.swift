@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Boosteroid Auth API
 //
 // CONFIRMED 2026-07-27/28 by capturing the real Android TV app's own traffic
-// (Frida SSL-pinning bypass + mitmproxy — see tools/android-tv-capture/):
+// (Frida SSL-pinning bypass + mitmproxy):
 // a direct, Turnstile-free email/password login via POST /api/v1/auth/login
 // — exactly what that app's own "Sign in Manually" screen does. This
 // replaced an earlier browser-plus-cookie-paste flow entirely (tvOS ships no
@@ -28,7 +28,7 @@ actor BoosteroidAuthAPI {
     }()
 
     /// CONFIRMED 2026-07-27 by capturing the real Android TV app's traffic
-    /// (Frida SSL-pinning bypass + mitmproxy — see tools/android-tv-capture/):
+    /// (Frida SSL-pinning bypass + mitmproxy):
     /// a direct, Turnstile-free email/password login — exactly what that
     /// app's own "Sign in Manually" button does. Response body:
     /// {"data":{"user":{id,name,email,avatar,...},"access_token":"Bearer ...",
@@ -53,8 +53,8 @@ actor BoosteroidAuthAPI {
         // decide whether to require a Turnstile token — a browser UA hitting
         // this Turnstile-free native-app route may simply get refused. These
         // headers override that per-request with the exact values captured
-        // from the real Android TV app (see tools/android-tv-capture/), so
-        // this call presents as that same recognized client. `device-info`
+        // from the real Android TV app, so this call presents as that same
+        // recognized client. `device-info`
         // and `device-name` describe the ANDROID EMULATOR the capture ran on
         // (not a real tvOS device) — using them verbatim maximizes the odds
         // of matching a known-accepted signature; TODO(protocol): swap in
