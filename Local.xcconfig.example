@@ -1,5 +1,16 @@
-// Local signing configuration — copy this file to Local.xcconfig and fill in your Team ID.
+// Local signing configuration. The project intentionally does NOT hardcode a
+// DEVELOPMENT_TEAM (it used to, before this went open source — a personal
+// Apple Developer Team ID has no business being in a public repo). The
+// simplest fix, and what most people should do: open the project in Xcode,
+// select the BoosteroidATV target → Signing & Capabilities, and pick your own
+// team there (Automatic signing). Xcode writes that choice to your local
+// project state, not to project.pbxproj, so it never gets committed.
+//
+// If you'd rather manage it via an xcconfig instead (e.g. for CI, or to keep
+// it out of Xcode's UI-managed state entirely): copy this file to
+// Local.xcconfig, fill in your Team ID below, then in Xcode go to the
+// project (not target) → Info tab → set each configuration's "Based on" to
+// Local.xcconfig. Local.xcconfig itself is git-ignored, so it stays yours.
 // Find your Team ID at developer.apple.com → Account → Membership.
-// To attach: Xcode → project → Info tab → select a configuration → set "Based on" to Local.xcconfig.
 
 DEVELOPMENT_TEAM = YOUR_TEAM_ID_HERE
