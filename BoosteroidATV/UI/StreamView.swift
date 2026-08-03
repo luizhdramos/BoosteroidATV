@@ -10,7 +10,14 @@ private enum VK {
     static let back: UInt16 = 0x08
     static let tab: UInt16 = 0x09
     static let enter: UInt16 = 0x0D
-    static let shift: UInt16 = 0x10
+    /// VK_LSHIFT, not the generic VK_SHIFT (0x10). CONFIRMED (see
+    /// BoosteroidControlChannel's keyboard-button protocol note and
+    /// VideoSurfaceView's HID→VK table, which maps a real hardware Left
+    /// Shift key to this exact value) — 0x10 is never actually produced by
+    /// a real key press, so the remote side only ever sees 0xA0/0xA1 for
+    /// Shift. Sending 0x10 for the Steam Overlay hotkey silently did
+    /// nothing because of this mismatch.
+    static let shift: UInt16 = 0xA0
     static let escape: UInt16 = 0x1B
     static let space: UInt16 = 0x20
     static let left: UInt16 = 0x25
@@ -523,15 +530,16 @@ struct StreamView: View {
     }
 
     /// Standard Steam in-game-overlay hotkey (Shift+Tab): a real key-down for
-    /// Shift, then Tab with the shift modifier bit set, released in reverse
-    /// order — mirrors how a real keyboard combo arrives, unlike just setting
-    /// the modifier bit on a lone Tab event (see VideoSurfaceView's HID→VK
-    /// path and InputSender.sendKeyEvent).
+    /// Shift, then Tab, released in reverse order — mirrors how a real
+    /// keyboard combo arrives. There's no "modifier bit" on the wire at all
+    /// (BoosteroidControlChannel's keyboard-button shape is just
+    /// {isPressed, code} — InputSender.sendKeyEvent already ignores
+    /// scancode/modifiers), so Shift only registers remotely if it's sent as
+    /// its own button-down event with the correct VK — see VK.shift's note.
     private func sendSteamOverlayHotkey() {
-        let shiftHeld: UInt16 = 0x0001
-        controller.inputSender?.sendKeyEvent(down: true, vk: VK.shift, scancode: 0, modifiers: shiftHeld)
-        controller.inputSender?.sendKeyEvent(down: true, vk: VK.tab, scancode: 0, modifiers: shiftHeld)
-        controller.inputSender?.sendKeyEvent(down: false, vk: VK.tab, scancode: 0, modifiers: shiftHeld)
+        controller.inputSender?.sendKeyEvent(down: true, vk: VK.shift, scancode: 0, modifiers: 0)
+        controller.inputSender?.sendKeyEvent(down: true, vk: VK.tab, scancode: 0, modifiers: 0)
+        controller.inputSender?.sendKeyEvent(down: false, vk: VK.tab, scancode: 0, modifiers: 0)
         controller.inputSender?.sendKeyEvent(down: false, vk: VK.shift, scancode: 0, modifiers: 0)
     }
 
