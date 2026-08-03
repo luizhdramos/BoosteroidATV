@@ -175,6 +175,25 @@ actor BoosteroidControlChannel {
     /// Opens the control WebSocket and returns a stream of parsed incoming
     /// events (mainly controller-connect acks). The stream finishes when the
     /// socket closes or errors.
+    ///
+    /// `devType`/`os` EXPERIMENT (2026-08-03): previously "desktop"/"win",
+    /// i.e. this client told Boosteroid it was a regular PC browser. The user
+    /// observed that Boosteroid's own server-side logic auto-launches Steam
+    /// into Big Picture when a session is opened from a phone or a TV client
+    /// (e.g. CloudGear on iOS) — something a plain desktop session never
+    /// gets. `devType`/`os` are both real, CONFIRMED enum fields on this
+    /// exact URL (see this file's header: `devType={desktop|mobile|tv|
+    /// avtomotive|tablet}`, `os={win|lin|mac|a|atv|...}` — "tv"/"atv" aren't
+    /// invented values), so declaring this app as what it actually is (a TV
+    /// client on tvOS) is a reasonable, low-risk thing to try. This is
+    /// UNCONFIRMED against real traffic, though: it's possible Boosteroid's
+    /// Big-Picture trigger is keyed off something else entirely (account
+    /// history, `clientType`, a header we're not sending). Deliberately
+    /// leaves `clientType` at "web" — THAT field is the one CONFIRMED to
+    /// select the video transport (web = WebRTC, native = raw UDP this app
+    /// doesn't implement — see this file's header) — so this change can't
+    /// affect whether video shows up at all, only (at most) devType-linked
+    /// server behavior like this.
     func connect(
         nodeBaseUrl: String,
         queryString: String,
@@ -182,9 +201,9 @@ actor BoosteroidControlChannel {
         resolutionHeight: Int,
         language: String = "en",
         refreshRate: Int = 60,
-	
-        os: String = "win",
-        devType: String = "desktop",
+
+        os: String = "atv",
+        devType: String = "tv",
         clientType: String = "web",
         maxBitrateBps: Int = 0
     ) -> AsyncStream<IncomingEvent> {
