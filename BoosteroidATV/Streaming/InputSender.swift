@@ -226,6 +226,34 @@ final class InputSender: InputEventHandler {
         ]) }
     }
 
+    /// Sends a multi-key combo (e.g. Shift+Tab for Steam's in-game overlay)
+    /// as a single, strictly-ordered sequence: every key down (in order),
+    /// held briefly, then every key up (in reverse order). Unlike calling
+    /// `sendKeyEvent` once per key — each of which fires its own independent,
+    /// unstructured `Task` — this awaits every `controlChannel.send` directly
+    /// in ONE task, so the four WebSocket frames cannot arrive out of order.
+    /// A modifier-then-key combo where the "up" for the modifier races ahead
+    /// of (or ties with) the actual key press is exactly the kind of thing a
+    /// remote low-level keyboard hook (which is what a Steam overlay hotkey
+    /// is) can miss — the brief hold below also gives that hook a real
+    /// window in which both keys are simultaneously down, rather than
+    /// relying on four back-to-back frames landing in the same instant.
+    func sendKeyCombo(_ vks: [UInt16]) {
+        Task { [controlChannel] in
+            for vk in vks {
+                await controlChannel.send(type: "keyboard", action: "button", fields: [
+                    "isPressed": true, "code": Int(vk),
+                ])
+            }
+            try? await Task.sleep(nanoseconds: 60_000_000) // 60ms hold
+            for vk in vks.reversed() {
+                await controlChannel.send(type: "keyboard", action: "button", fields: [
+                    "isPressed": false, "code": Int(vk),
+                ])
+            }
+        }
+    }
+
     // MARK: - Mouse
 
     func sendMouseMove(dx: Int16, dy: Int16) {

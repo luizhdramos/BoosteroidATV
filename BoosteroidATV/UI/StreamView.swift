@@ -503,18 +503,16 @@ struct StreamView: View {
         .padding(.horizontal, 8)
     }
 
-    /// Standard Steam in-game-overlay hotkey (Shift+Tab): a real key-down for
-    /// Shift, then Tab, released in reverse order — mirrors how a real
-    /// keyboard combo arrives. There's no "modifier bit" on the wire at all
-    /// (BoosteroidControlChannel's keyboard-button shape is just
-    /// {isPressed, code} — InputSender.sendKeyEvent already ignores
-    /// scancode/modifiers), so Shift only registers remotely if it's sent as
-    /// its own button-down event with the correct VK — see VK.shift's note.
+    /// Standard Steam in-game-overlay hotkey (Shift+Tab). Uses
+    /// InputSender.sendKeyCombo rather than four separate sendKeyEvent calls:
+    /// each sendKeyEvent fires its own independent Task, so nothing actually
+    /// guaranteed those four WebSocket frames left in order — for a
+    /// modifier+key combo that a remote low-level keyboard hook has to catch
+    /// (exactly what a Steam overlay hotkey is), that's enough to make it
+    /// silently never trigger. sendKeyCombo sends all of this sequentially in
+    /// one task and holds the combo briefly before releasing it.
     private func sendSteamOverlayHotkey() {
-        controller.inputSender?.sendKeyEvent(down: true, vk: VK.shift, scancode: 0, modifiers: 0)
-        controller.inputSender?.sendKeyEvent(down: true, vk: VK.tab, scancode: 0, modifiers: 0)
-        controller.inputSender?.sendKeyEvent(down: false, vk: VK.tab, scancode: 0, modifiers: 0)
-        controller.inputSender?.sendKeyEvent(down: false, vk: VK.shift, scancode: 0, modifiers: 0)
+        controller.inputSender?.sendKeyCombo([VK.shift, VK.tab])
     }
 
     private func statusView(title: String, message: String) -> some View {
