@@ -176,24 +176,29 @@ actor BoosteroidControlChannel {
     /// events (mainly controller-connect acks). The stream finishes when the
     /// socket closes or errors.
     ///
-    /// `devType`/`os` EXPERIMENT (2026-08-03): previously "desktop"/"win",
-    /// i.e. this client told Boosteroid it was a regular PC browser. The user
-    /// observed that Boosteroid's own server-side logic auto-launches Steam
-    /// into Big Picture when a session is opened from a phone or a TV client
-    /// (e.g. CloudGear on iOS) — something a plain desktop session never
-    /// gets. `devType`/`os` are both real, CONFIRMED enum fields on this
-    /// exact URL (see this file's header: `devType={desktop|mobile|tv|
-    /// avtomotive|tablet}`, `os={win|lin|mac|a|atv|...}` — "tv"/"atv" aren't
-    /// invented values), so declaring this app as what it actually is (a TV
-    /// client on tvOS) is a reasonable, low-risk thing to try. This is
-    /// UNCONFIRMED against real traffic, though: it's possible Boosteroid's
-    /// Big-Picture trigger is keyed off something else entirely (account
-    /// history, `clientType`, a header we're not sending). Deliberately
-    /// leaves `clientType` at "web" — THAT field is the one CONFIRMED to
-    /// select the video transport (web = WebRTC, native = raw UDP this app
-    /// doesn't implement — see this file's header) — so this change can't
-    /// affect whether video shows up at all, only (at most) devType-linked
-    /// server behavior like this.
+    /// `devType`/`os` EXPERIMENT (2026-08-03, round 2): previously "desktop"/
+    /// "win", i.e. this client told Boosteroid it was a regular PC browser.
+    /// The user observed that Boosteroid's own server-side logic auto-
+    /// launches Steam into Big Picture when a session is opened from a phone
+    /// or a TV client (e.g. CloudGear on iOS) — something a plain desktop
+    /// session never gets. `devType=tv` (round 1) did NOT trigger this — no
+    /// change in behavior. Trying `devType=mobile` instead, since CloudGear
+    /// (the confirmed working case) opens the session from a phone, not a
+    /// TV — so "mobile" may be the actual trigger, not "tv". `os` stays
+    /// "atv" (still the accurate OS; devType is what's changing here).
+    /// `devType`/`os` are both real, CONFIRMED enum fields on this exact URL
+    /// (see this file's header: `devType={desktop|mobile|tv|avtomotive|
+    /// tablet}`, `os={win|lin|mac|a|atv|...}` — none of these are invented
+    /// values). Still UNCONFIRMED against real traffic either way — if this
+    /// doesn't work either, the Big-Picture trigger is likely keyed off
+    /// something else entirely (account history, `clientType`, a header
+    /// we're not sending) and probably not worth further guessing at without
+    /// a real traffic capture from CloudGear itself. Deliberately leaves
+    /// `clientType` at "web" — THAT field is the one CONFIRMED to select the
+    /// video transport (web = WebRTC, native = raw UDP this app doesn't
+    /// implement — see this file's header) — so this change can't affect
+    /// whether video shows up at all, only (at most) devType-linked server
+    /// behavior like this.
     func connect(
         nodeBaseUrl: String,
         queryString: String,
@@ -203,7 +208,7 @@ actor BoosteroidControlChannel {
         refreshRate: Int = 60,
 
         os: String = "atv",
-        devType: String = "tv",
+        devType: String = "mobile",
         clientType: String = "web",
         maxBitrateBps: Int = 0
     ) -> AsyncStream<IncomingEvent> {

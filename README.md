@@ -95,6 +95,7 @@ This is an **experimental, reverse-engineered** client. The core loop — sign i
 - Richer catalog browsing (store / search / carousels, Continue Playing / Favorites rows)
 - Help screen content
 - Community testing across more controller models, especially around rumble
+- H.265/AV1 video (Apple TV can decode both, but Boosteroid only offers them over its raw-UDP `clientType=native` transport, not the WebRTC path this app uses — the native protocol itself has never been captured/documented, so this would start from scratch with a traffic capture, not just a settings change)
 
 ## Contributing
 
