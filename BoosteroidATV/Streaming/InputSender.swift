@@ -359,6 +359,23 @@ final class InputSender: InputEventHandler {
             while !Task.isCancelled {
                 guard let self else { return }
                 for controller in GCController.controllers() {
+                    // Self-healing registration: `handleControllerConnected`
+                    // is otherwise only ever called once up front (start()'s
+                    // initial GCController.controllers() sweep) and from the
+                    // .GCControllerDidConnect notification. Reported symptom:
+                    // "sometimes leaving and re-entering a session, the
+                    // controller doesn't connect" — GameController's own
+                    // notification delivery is known to occasionally be late
+                    // or missed entirely right after the app backgrounds/
+                    // foregrounds or a Bluetooth controller re-pairs, and
+                    // nothing was ever retried if that happened. Calling this
+                    // every poll tick is safe/idempotent — it already guards
+                    // on controllerIds/pendingControllerNames being empty for
+                    // this controller — so a controller that's physically
+                    // present but somehow never got registered self-heals
+                    // within ~1 poll interval instead of staying dead for the
+                    // rest of the session.
+                    self.handleControllerConnected(controller)
                     guard let pad = controller.extendedGamepad,
                           let id = self.controllerIds[ObjectIdentifier(controller)] else { continue }
                     self.pollGamepad(controller: controller, id: id, pad: pad)
