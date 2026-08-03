@@ -154,15 +154,7 @@ struct StreamView: View {
                     // itself both ways. Menu/Back keeps its natural system
                     // behavior (dismiss back Home) instead; see
                     // VideoSurfaceView.pressesBegan.
-                    onMenu: {
-                        if showKeyboard {
-                            showKeyboard = false
-                        } else if showPerformanceFlyout {
-                            showPerformanceFlyout = false
-                        } else {
-                            showOverlay.toggle()
-                        }
-                    },
+                    onMenu: { togglePauseBar() },
                     pointerMode: pointerMode,
                     onPointerPosition: { localCursor = $0 },
                     // Pointer coordinates are in the REMOTE desktop's pixels, so
@@ -246,13 +238,27 @@ struct StreamView: View {
         // counterpart to pressesBegan's raw-input path, so together they
         // cover both states.
         .onPlayPauseCommand {
-            if showKeyboard {
-                showKeyboard = false
-            } else if showPerformanceFlyout {
-                showPerformanceFlyout = false
-            } else {
-                showOverlay.toggle()
-            }
+            togglePauseBar()
+        }
+        // Gamepad Home/Guide button (Xbox/PS/Switch-Home) as a second way to
+        // open the pause bar, for controllers where reaching the Siri Remote
+        // isn't convenient — see InputSender.pollGamepad's note on why this
+        // specific button is safe to repurpose (never sent to the game).
+        // UNCONFIRMED whether tvOS actually delivers Home presses to the app
+        // at all rather than reserving them system-side — needs real-device
+        // testing.
+        .onReceive(NotificationCenter.default.publisher(for: .gamepadHomeButtonPressed)) { _ in
+            togglePauseBar()
+        }
+    }
+
+    private func togglePauseBar() {
+        if showKeyboard {
+            showKeyboard = false
+        } else if showPerformanceFlyout {
+            showPerformanceFlyout = false
+        } else {
+            showOverlay.toggle()
         }
     }
 
