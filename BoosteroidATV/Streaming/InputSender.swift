@@ -2,14 +2,6 @@ import CoreHaptics
 import Foundation
 import GameController
 
-extension Notification.Name {
-    /// Posted (main thread) on the rising edge of a gamepad's Home/Guide
-    /// button — see InputSender.pollGamepad's note for why this button
-    /// specifically is safe to repurpose locally (StreamView listens for
-    /// this to open the in-stream pause bar).
-    static let gamepadHomeButtonPressed = Notification.Name("BoosteroidATV.gamepadHomeButtonPressed")
-}
-
 // MARK: - Input Event Handler
 //
 // Same shape as CloudNow's InputEventHandler protocol so VideoSurfaceView's
@@ -144,10 +136,6 @@ final class InputSender: InputEventHandler {
     private var lastButtonState: [ObjectIdentifier: [Int: Bool]] = [:]
     private var lastAxisState: [ObjectIdentifier: [Int: Int]] = [:]
     private var lastHat: [ObjectIdentifier: Int] = [:]
-    /// Separate from lastButtonState on purpose — Home/Guide is local-only
-    /// (see pollGamepad's note) and must never be diffed alongside the
-    /// buttons that actually get sent to the game.
-    private var lastHomeButtonState: [ObjectIdentifier: Bool] = [:]
 
     /// Same threshold the real web client uses (`GamepadController.
     /// AXIS_THRESHOLD`) before re-sending an axis value, out of a ±32767
@@ -357,7 +345,6 @@ final class InputSender: InputEventHandler {
         lastButtonState.removeValue(forKey: key)
         lastAxisState.removeValue(forKey: key)
         lastHat.removeValue(forKey: key)
-        lastHomeButtonState.removeValue(forKey: key)
         if let haptics = hapticsByController.removeValue(forKey: key) { haptics.stop() }
         connectedControllerCount = GCController.controllers().count
     }
@@ -413,26 +400,6 @@ final class InputSender: InputEventHandler {
             }
         }
         lastButtonState[key] = buttonState
-
-        // Home/Guide button (Xbox/PS/Switch-Home) — deliberately NOT part of
-        // the byte-for-byte-matched 0-9 button set above (Boosteroid's own
-        // protocol never sends a "Home" index to the game — see the buttons
-        // array), so this is free to repurpose locally: open the in-stream
-        // pause bar, the same thing Play/Pause already does, for controllers
-        // that have no clean equivalent otherwise (Menu/Start is already
-        // spoken for — see this app's Menu/Back trade-off). Tracked
-        // separately from lastButtonState/lastHomeButtonState so it never
-        // gets sent to the game. UNCONFIRMED whether tvOS actually delivers
-        // this to the app at all (vs. reserving it the way the Siri Remote's
-        // own TV/Home button always exits to the Home Screen) — needs
-        // testing on real hardware.
-        if let homeButton = pad.buttonHome {
-            let wasPressed = lastHomeButtonState[key] ?? false
-            if homeButton.isPressed, !wasPressed {
-                NotificationCenter.default.post(name: .gamepadHomeButtonPressed, object: nil)
-            }
-            lastHomeButtonState[key] = homeButton.isPressed
-        }
 
         // Axes 0-5 — CONFIRMED indices/range, see BoosteroidControlChannel.
         // GameController's Y axis is +1-up; the browser Gamepad API (and
