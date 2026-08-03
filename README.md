@@ -8,7 +8,7 @@ A native, open-source **tvOS** client for [Boosteroid](https://cloud.boosteroid.
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-experimental-yellow)
 
-> **Unofficial project.** BoosteroidATV is an independent, community-built client. It is **not affiliated with, endorsed by, or supported by Boosteroid**. It talks to Boosteroid's service using the same web APIs the official web player uses, reverse-engineered from observed traffic. Use it with your own paid account, for personal and educational purposes.
+> **Unofficial project.** BoosteroidATV is an independent, community-built client. It is **not affiliated with, endorsed by, or supported by Boosteroid**. It talks to Boosteroid's service using the same APIs the official apps use. Use it with your own paid account, for personal and educational purposes.
 
 ---
 
@@ -83,7 +83,7 @@ Type your email and password on the Apple TV — no browser, no second device. T
 
 ## Status & limitations
 
-This is an **experimental, reverse-engineered** client. The core loop — sign in, list library, launch a game standalone (fresh queue or resume), stream video/audio, and send controller input (including rumble) — has been verified end-to-end against a real, paying account. Known constraints:
+This is an **experimental, independently-built** client. The core loop — sign in, list library, launch a game standalone (fresh queue or resume), stream video/audio, and send controller input (including rumble) — has been verified end-to-end against a real, paying account. Known constraints:
 
 - **H.264 only.** Boosteroid's WebRTC path only offers H.264. H.265/HEVC and AV1 are delivered exclusively over Boosteroid's native UDP transport, which this client does not implement. (Apple TV can decode HEVC, so this is a service-side limitation, not a device one.)
 - **Session termination not yet confirmed.** The Disconnect button closes the local connection; whether it also reliably ends the session on Boosteroid's side hasn't been validated yet.
@@ -99,7 +99,7 @@ This is an **experimental, reverse-engineered** client. The core loop — sign i
 
 ## Contributing
 
-Issues and pull requests are welcome — this is a reverse-engineered client with no official docs behind it, so real-device testing (different controllers, regions, network conditions) is especially valuable. If you're touching the streaming/protocol layer, `docs/switch-port-handoff.md` and the `CONFIRMED` / `TODO(protocol)` / `UNCONFIRMED` comments throughout `BoosteroidATV/Streaming` and `BoosteroidATV/Session` explain what's been verified against real traffic versus what's still a best guess.
+Issues and pull requests are welcome — this is an independent client with no official docs behind it, so real-device testing (different controllers, regions, network conditions) is especially valuable. If you're touching the streaming/protocol layer, `docs/switch-port-handoff.md` and the `CONFIRMED` / `TODO(protocol)` / `UNCONFIRMED` comments throughout `BoosteroidATV/Streaming` and `BoosteroidATV/Session` explain what's been verified in practice versus what's still a best guess.
 
 ## Support
 
