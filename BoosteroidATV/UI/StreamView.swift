@@ -326,32 +326,6 @@ struct StreamView: View {
         let mbps = Double(controller.stats.bitrateKbps) / 1000
         var line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps | Stream FPS: \(controller.streamFps) | Latency: \(controller.rttMs)ms"
         if let connectedServerName { line += " | Server: \(connectedServerName)" }
-        // DIAGNOSTIC (added 2026-08-09, same approach as the Start-button
-        // investigation): narrows down where rumble is failing.
-        // - RumbleRecv stuck at 0: the server never sent a rumble event for
-        //   this game/session — nothing client-side can fix that.
-        // - RumbleRecv climbing but Haptics shows "no": GameController says
-        //   this controller doesn't support haptics at all.
-        // - Haptics "yes" but RumbleErr non-empty: CoreHaptics setup itself
-        //   threw — the message is the actual SDK error.
-        line += " | RumbleRecv: \(controller.rumbleMessagesReceived)"
-        line += " | Haptics: \(controller.rumbleHapticsAvailable.map { $0 ? "yes" : "no" } ?? "?")"
-        if let rumbleSetupError = controller.rumbleSetupError { line += " | RumbleErr: \(rumbleSetupError)" }
-        // DIAGNOSTIC round 2 (2026-08-09): setup now succeeds with no error
-        // but nothing physically vibrates. LR shows the actual left/right
-        // magnitudes the server is sending (rules out "values are ~0" even
-        // though messages are arriving), and Localities shows which
-        // GCHapticsLocality this specific controller reports supporting
-        // (rules out "we created an engine for a locality with no real
-        // motor behind it" — see InputSender.makeControllerHaptics).
-        line += " | RumbleLR: \(String(format: "%.2f", controller.rumbleLastLeft))/\(String(format: "%.2f", controller.rumbleLastRight))"
-        line += " | Localities: \(controller.rumbleSupportedLocalities)"
-        // DIAGNOSTIC round 3 (2026-08-09): Haptics yes, Localities set,
-        // RumbleLR nonzero, still no vibration — the previous code drove
-        // intensity via sendParameters wrapped in `try?`, so a silent
-        // failure there was invisible. Now every pattern rebuild's errors
-        // (see InputSender.HapticChannel) surface here instead.
-        if let rumbleSendError = controller.rumbleSendError { line += " | SendErr: \(rumbleSendError)" }
         // Video and input ride entirely separate connections — the control
         // channel can silently die (network blip, server timeout) while video
         // keeps playing perfectly, leaving mouse/keyboard/controller dead with
