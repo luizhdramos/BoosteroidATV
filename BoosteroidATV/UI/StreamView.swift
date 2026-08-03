@@ -411,15 +411,6 @@ struct StreamView: View {
                         sendSteamOverlayHotkey()
                         showOverlay = false
                     }
-                    // EXPERIMENTAL — see InputSender.openSteamBigPictureViaRunDialog's
-                    // doc comment for exactly why this is a "try it and see" button
-                    // rather than something documented/relied on: Win+R -> Run
-                    // dialog -> type steam://open/bigpicture -> Enter, with no
-                    // acknowledgment from the remote either way.
-                    topBarPill("Big Picture (test)", systemImage: "tv") {
-                        controller.inputSender?.openSteamBigPictureViaRunDialog()
-                        showOverlay = false
-                    }
                     topBarPill("Performance Overlay", systemImage: "gauge.with.dots.needle.67percent",
                                active: showPerformanceFlyout) {
                         showPerformanceFlyout.toggle()
