@@ -254,6 +254,68 @@ final class InputSender: InputEventHandler {
         }
     }
 
+    // MARK: - Big Picture (experimental)
+
+    /// UNCONFIRMED / experimental: no session-lifecycle API to request Big
+    /// Picture directly, so this drives the actual Windows shell instead —
+    /// Win+R to open the Run dialog, type `steam://open/bigpicture` (a real,
+    /// documented Steam URI — see help.steampowered.com and Steam's own
+    /// desktop-shortcut docs), then Enter. Unlike the Steam Overlay hotkey
+    /// (a single documented Shift+Tab combo caught by a low-level hook),
+    /// every step here can silently fail with zero feedback: Win+R might be
+    /// policy-disabled on the remote, the Run dialog might not have focus by
+    /// the time typing starts, or the game Boosteroid auto-launches right
+    /// after connecting might steal focus mid-sequence. There's no ack from
+    /// the remote either way — the only way to know if it worked is to
+    /// watch the stream.
+    func openSteamBigPictureViaRunDialog() {
+        Task { [controlChannel] in
+            let winKey: UInt16 = 0x5B  // VK_LWIN — confirmed in VideoSurfaceView's HID→VK table
+            let rKey: UInt16 = 0x52    // VK_R (letter VKs == uppercase ASCII)
+            let shiftKey: UInt16 = 0xA0 // VK_LSHIFT (see StreamView.VK.shift's note)
+            let enterKey: UInt16 = 0x0D
+
+            func button(_ down: Bool, _ vk: UInt16) async {
+                await controlChannel.send(type: "keyboard", action: "button", fields: [
+                    "isPressed": down, "code": Int(vk),
+                ])
+            }
+
+            // Win+R
+            await button(true, winKey)
+            await button(true, rKey)
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            await button(false, rKey)
+            await button(false, winKey)
+
+            // Give the Run dialog time to actually open and take focus
+            // before typing into it.
+            try? await Task.sleep(nanoseconds: 700_000_000)
+
+            for (vk, needsShift) in Self.bigPictureURIKeys {
+                if needsShift { await button(true, shiftKey) }
+                await button(true, vk)
+                await button(false, vk)
+                if needsShift { await button(false, shiftKey) }
+            }
+
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            await button(true, enterKey)
+            await button(false, enterKey)
+        }
+    }
+
+    /// `steam://open/bigpicture`, pre-encoded as (VK, needsShift) pairs.
+    /// Letter VKs are the uppercase ASCII value (same trick VirtualKeyboardView
+    /// uses); ':' is shift+VK_OEM_1 (0xBA), '/' is unshifted VK_OEM_2 (0xBF).
+    private static let bigPictureURIKeys: [(UInt16, Bool)] = "steam://open/bigpicture".map { char -> (UInt16, Bool) in
+        switch char {
+        case ":": return (0xBA, true)
+        case "/": return (0xBF, false)
+        default: return (UInt16(String(char).uppercased().unicodeScalars.first!.value), false)
+        }
+    }
+
     // MARK: - Mouse
 
     func sendMouseMove(dx: Int16, dy: Int16) {
