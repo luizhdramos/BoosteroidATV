@@ -166,7 +166,7 @@ actor BoosteroidAuthAPI {
 /// from the real Android TV app). Reuses BoosteroidUserResponseDTO.Payload's
 /// shape for the nested user object (SessionState.swift) since it's the same
 /// {id,name,email,avatar} fields as GET /api/v1/user.
-private struct BoosteroidLoginResponseDTO: Decodable {
+private nonisolated struct BoosteroidLoginResponseDTO: Decodable {
     struct DataDTO: Decodable {
         let user: BoosteroidUserResponseDTO.Payload
         let accessToken: String
