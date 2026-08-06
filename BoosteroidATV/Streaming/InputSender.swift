@@ -313,9 +313,30 @@ final class InputSender: InputEventHandler {
     // MARK: - Controller Connect / Disconnect
 
     private func handleControllerConnected(_ controller: GCController) {
+        // EXTENDED GAMEPADS ONLY. Bug found 2026-08-06 from a decisive user
+        // report: "picking up the Siri Remote made a controller show up as
+        // connected in Steam, but using it does nothing." On tvOS the Siri
+        // Remote is itself a GCController — it exposes a `microGamepad` but
+        // NEVER an `extendedGamepad`, and it typically only appears in
+        // GCController.controllers() once it's physically woken/used. This
+        // function used to accept ANY GCController, so the Remote got
+        // registered and announced to the server as a connected gamepad,
+        // while the poll loop correctly skipped it for actual input (it
+        // guards on extendedGamepad) — a phantom controller, exactly as
+        // reported. It also shifted the REAL gamepad's index (see below).
+        guard controller.extendedGamepad != nil else { return }
+
         let key = ObjectIdentifier(controller)
         guard controllerIds[key] == nil, pendingControllerNames[key] == nil else { return }
-        let index = GCController.controllers().firstIndex(of: controller) ?? 0
+
+        // Index among EXTENDED GAMEPADS only, not all GCControllers. The
+        // browser Gamepad API this mirrors never sees a Siri Remote, so
+        // counting non-gamepad GCControllers here pushed the real gamepad to
+        // index 1 (or higher) and made our provisional id disagree with the
+        // id the server assigns — and the server keys every input frame by
+        // that id, so mismatched input is silently dropped.
+        let gamepads = GCController.controllers().filter { $0.extendedGamepad != nil }
+        let index = gamepads.firstIndex(of: controller) ?? 0
         // CONFIRMED shape: the browser sends `${gamepad.id}${gamepad.index}`
         // as a correlation token; any reasonably unique string works the
         // same way here since we only need it to match our own ack.
@@ -330,7 +351,7 @@ final class InputSender: InputEventHandler {
         // controller/connected ack does come back, handleIncoming upgrades
         // controllerIds[key] to the server's id (see there).
         controllerIds[key] = index
-        connectedControllerCount = GCController.controllers().count
+        connectedControllerCount = gamepads.count
 
         Task { [controlChannel] in await controlChannel.send(type: "controller", action: "connected", fields: ["name": name]) }
     }
@@ -346,7 +367,10 @@ final class InputSender: InputEventHandler {
         lastAxisState.removeValue(forKey: key)
         lastHat.removeValue(forKey: key)
         if let haptics = hapticsByController.removeValue(forKey: key) { haptics.stop() }
-        connectedControllerCount = GCController.controllers().count
+        // Extended gamepads only, matching handleControllerConnected — this
+        // count feeds the on-screen diagnostics, so counting the Siri Remote
+        // made it read one higher than the number of real gamepads.
+        connectedControllerCount = GCController.controllers().filter { $0.extendedGamepad != nil }.count
     }
 
     // MARK: - Controller Polling
