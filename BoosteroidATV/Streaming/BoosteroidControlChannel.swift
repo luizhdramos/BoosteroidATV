@@ -176,29 +176,25 @@ actor BoosteroidControlChannel {
     /// events (mainly controller-connect acks). The stream finishes when the
     /// socket closes or errors.
     ///
-    /// `devType`/`os` EXPERIMENT (2026-08-03, round 2): previously "desktop"/
-    /// "win", i.e. this client told Boosteroid it was a regular PC browser.
-    /// The user observed that Boosteroid's own server-side logic auto-
-    /// launches Steam into Big Picture when a session is opened from a phone
-    /// or a TV client (e.g. CloudGear on iOS) — something a plain desktop
-    /// session never gets. `devType=tv` (round 1) did NOT trigger this — no
-    /// change in behavior. Trying `devType=mobile` instead, since CloudGear
-    /// (the confirmed working case) opens the session from a phone, not a
-    /// TV — so "mobile" may be the actual trigger, not "tv". `os` stays
-    /// "atv" (still the accurate OS; devType is what's changing here).
-    /// `devType`/`os` are both real, CONFIRMED enum fields on this exact URL
-    /// (see this file's header: `devType={desktop|mobile|tv|avtomotive|
-    /// tablet}`, `os={win|lin|mac|a|atv|...}` — none of these are invented
-    /// values). Still UNCONFIRMED against real traffic either way — if this
-    /// doesn't work either, the Big-Picture trigger is likely keyed off
-    /// something else entirely (account history, `clientType`, a header
-    /// we're not sending) and probably not worth further guessing at without
-    /// a real traffic capture from CloudGear itself. Deliberately leaves
-    /// `clientType` at "web" — THAT field is the one CONFIRMED to select the
-    /// video transport (web = WebRTC, native = raw UDP this app doesn't
-    /// implement — see this file's header) — so this change can't affect
-    /// whether video shows up at all, only (at most) devType-linked server
-    /// behavior like this.
+    /// `devType=mobile` — CONFIRMED 2026-08-06 on real hardware: this is what
+    /// makes Boosteroid auto-launch Steam directly into BIG PICTURE mode.
+    ///
+    /// Boosteroid's server-side logic starts Steam in Big Picture for phone/TV
+    /// clients but not for desktop ones. This client originally sent
+    /// "desktop"/"win" (i.e. claimed to be a regular PC browser) and always
+    /// landed on the plain Steam desktop. Testing, in order: `devType=tv` did
+    /// NOT trigger it (no change at all), `devType=mobile` DID — matching the
+    /// observation that CloudGear on iOS, which opens its session from a
+    /// phone, always gets Big Picture. So the trigger is specifically
+    /// "mobile", not "tv", however counterintuitive that is for an Apple TV
+    /// app. `os` stays "atv" (accurate, and not what's doing the work here).
+    ///
+    /// Both are real enum fields on this exact URL — see this file's header:
+    /// `devType={desktop|mobile|tv|avtomotive|tablet}`,
+    /// `os={win|lin|mac|a|atv|...}`. Deliberately leaves `clientType` at
+    /// "web": THAT is the field confirmed to select the video transport
+    /// (web = WebRTC, native = raw UDP this app doesn't implement — see the
+    /// header), so none of this affects whether video works.
     func connect(
         nodeBaseUrl: String,
         queryString: String,

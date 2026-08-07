@@ -602,6 +602,13 @@ extension StreamController: LKRTCPeerConnectionDelegate {
             self.stage = ""
             self.state = .streaming
             self.startStatsLoop()
+            // Controllers were announced back when the control socket opened,
+            // which can be well before the server finished bringing the
+            // session up — any announce that lands in that window is dropped
+            // and was never retried. Video arriving means the session is
+            // definitively live, so re-announce anything still unacked. See
+            // InputSender.reannounceUnackedControllers.
+            self.inputSender?.reannounceUnackedControllers()
         }
     }
 

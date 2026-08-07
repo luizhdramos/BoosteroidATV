@@ -218,6 +218,37 @@ final class InputSender: InputEventHandler {
         }
     }
 
+    /// Re-sends `controller/connected` for every gamepad the server has NOT
+    /// acked yet. Called by StreamController the moment video actually starts
+    /// (see its state = .streaming transition).
+    ///
+    /// Fixes the reported "the FIRST session never picks up the controller —
+    /// I have to leave to Home and reopen the game for it to work". Root
+    /// cause: `start()` announces controllers as soon as
+    /// `controlChannel.connect()` returns, but that returns immediately (it
+    /// just flips `isOpen` and resumes the URLSessionWebSocketTask) — long
+    /// before the server has finished bringing the session up and created the
+    /// virtual gamepad on the Windows side. An announce that lands during
+    /// that window is simply dropped server-side, and nothing ever retried
+    /// it: `handleControllerConnected` optimistically records a provisional
+    /// id locally and then permanently skips that controller on every later
+    /// call (it guards on controllerIds/pendingControllerNames being empty),
+    /// so the pad looked registered to us and didn't exist to the server for
+    /// the rest of the session. Reopening the game worked because the second
+    /// connect hits an already-warm session.
+    ///
+    /// Only unacked controllers are re-sent — `pendingControllerNames` is
+    /// cleared in `handleIncoming` the moment an ack arrives — so a gamepad
+    /// the server already knows about is never announced twice (which would
+    /// risk registering a duplicate pad).
+    func reannounceUnackedControllers() {
+        for name in pendingControllerNames.values {
+            Task { [controlChannel] in
+                await controlChannel.send(type: "controller", action: "connected", fields: ["name": name])
+            }
+        }
+    }
+
     // MARK: - Keyboard
 
     func sendKeyEvent(down: Bool, vk: UInt16, scancode: UInt16, modifiers: UInt16) {
