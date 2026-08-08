@@ -88,12 +88,10 @@ This is an **experimental, independently-built** client. The core loop — sign 
 - **H.264 only.** Boosteroid's WebRTC path only offers H.264. H.265/HEVC and AV1 are delivered exclusively over Boosteroid's native UDP transport, which this client does not implement. (Apple TV can decode HEVC, so this is a service-side limitation, not a device one.)
 - **Session termination not yet confirmed.** The Disconnect button closes the local connection; whether it also reliably ends the session on Boosteroid's side hasn't been validated yet.
 - **No catalog browsing yet.** Home shows your installed library as a grid; there's no search, store browsing, or "Continue Playing"/Favorites rows yet.
-- **Help screen is a placeholder.** The topic list exists in the UI but has no content behind it yet.
 
 ## Roadmap
 
 - Richer catalog browsing (store / search / carousels, Continue Playing / Favorites rows)
-- Help screen content
 - Community testing across more controller models, especially around rumble
 - H.265/AV1 video (Apple TV can decode both, but Boosteroid only offers them over its raw-UDP `clientType=native` transport, not the WebRTC path this app uses — the native protocol itself has never been captured/documented, so this would start from scratch with a traffic capture, not just a settings change)
 
