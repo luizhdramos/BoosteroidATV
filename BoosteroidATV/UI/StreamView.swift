@@ -333,8 +333,9 @@ struct StreamView: View {
         // BoosteroidClient.probeSessionStop for why this is worth probing
         // rather than trusting the recorded "no such endpoint" conclusion.
         if alive.hasGateway {
-            report += "\nprobe: " + await client.probeSessionStop(
+            let probe = await client.probeSessionStop(
                 sessionId: session.sessionId, appId: Int(game.id), cookies: cookies)
+            report += "\nprobe: " + probe
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             alive = await client.sessionAliveStatus(sessionId: session.sessionId, cookies: cookies)
             report += " | now: details \(alive.status)"
