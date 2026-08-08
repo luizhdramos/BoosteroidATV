@@ -131,7 +131,9 @@ final class StreamController: NSObject {
     private var pendingLocalICE: [(sdp: String, sdpMid: String?, sdpMLineIndex: Int)] = []
     private(set) var videoView: VideoSurfaceView?
     private var statsTask: Task<Void, Never>?
-    private var sessionInfo: SessionInfo?
+    /// Readable so the Disconnect button can run the REST teardown against
+    /// this exact session/node — see StreamView's Disconnect handler.
+    private(set) var sessionInfo: SessionInfo?
     private var settings = StreamSettings()
 
     private static let factory: LKRTCPeerConnectionFactory = {

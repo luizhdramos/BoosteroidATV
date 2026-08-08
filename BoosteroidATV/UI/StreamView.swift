@@ -252,6 +252,43 @@ struct StreamView: View {
         }
     }
 
+    /// Ends the session on Boosteroid's side — everything except this
+    /// device's own local teardown, which the caller does afterwards.
+    ///
+    /// Sends BOTH known teardown mechanisms, because the WebSocket message
+    /// alone demonstrably wasn't enough (reported twice: Disconnect returns
+    /// to the menu, then reopening the game lands on the exact same spot, so
+    /// the machine was never released):
+    ///
+    ///  1. `settings/terminating` on the control socket — captured from the
+    ///     real web client's own End Session flow, and the only thing this
+    ///     button used to do.
+    ///  2. `hangup` on the streaming node, then `dequeue`. This pair is NOT
+    ///     speculative: `BoosteroidClient.createSession` already runs exactly
+    ///     it when you launch a DIFFERENT game, and that path is the one
+    ///     observed to actually free the machine — the comments there record
+    ///     that dequeue alone left the previous machine bound while the pair
+    ///     released it. The Disconnect button simply never used it.
+    ///
+    /// Order matters: the socket message goes first, while the control
+    /// channel is still open (send() no-ops once it isn't), and the node
+    /// hangup uses the gateway host we already hold rather than re-fetching
+    /// `session/details`, which can fail for a session that's mid-teardown.
+    /// All of it is best-effort — nothing here should be able to trap the
+    /// user in the stream if a call fails.
+    private func endCloudSession() async {
+        await controller.terminateSession()
+
+        guard let session = controller.sessionInfo,
+              !session.sessionId.isEmpty,
+              let cookies = try? await authManager.resolveCookies() else { return }
+
+        if let node = session.nodeBaseUrl ?? claimedGateway {
+            await client.hangUpSession(sessionId: session.sessionId, nodeBaseUrl: node, cookies: cookies)
+        }
+        await client.dequeue(cookies: cookies)
+    }
+
     /// Shared by every route into the bar (Siri Remote Play/Pause via both
     /// the raw-input and focus-system paths, and the gamepad combo) so they
     /// can't drift apart.
@@ -396,7 +433,7 @@ struct StreamView: View {
                     guard !isDisconnecting else { return }
                     isDisconnecting = true
                     Task {
-                        await controller.terminateSession()
+                        await endCloudSession()
                         controller.disconnect()
                         onDismiss()
                     }

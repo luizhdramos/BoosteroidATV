@@ -8,7 +8,9 @@ struct SettingsView: View {
         ("720p", "1280x720"), ("1080p", "1920x1080"),
         ("1440p", "2560x1440"), ("4K", "3840x2160"),
     ]
-    private let fpsOptions: [(String, Int)] = [("30", 30), ("60", 60), ("120", 120)]
+    // 30 removed 2026-08-06: Boosteroid never delivers below 60, so offering
+    // it only created a setting that silently did nothing.
+    private let fpsOptions: [(String, Int)] = [("60", 60), ("120", 120)]
 
     var body: some View {
         @Bindable var viewModel = viewModel

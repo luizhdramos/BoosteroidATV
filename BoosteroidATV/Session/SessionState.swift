@@ -49,7 +49,11 @@ nonisolated struct StreamSettings: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         resolution = try container.decodeIfPresent(String.self, forKey: .resolution) ?? "1920x1080"
-        fps = try container.decodeIfPresent(Int.self, forKey: .fps) ?? 60
+        // max(60, ...): 30 fps used to be offered in Settings but Boosteroid
+        // never delivers below 60, so anyone with 30 saved from an older
+        // build is migrated up rather than left on a value the UI can no
+        // longer even display as selected.
+        fps = max(60, try container.decodeIfPresent(Int.self, forKey: .fps) ?? 60)
         maxBitrateKbps = try container.decodeIfPresent(Int.self, forKey: .maxBitrateKbps) ?? 20_000
         codec = try container.decodeIfPresent(VideoCodec.self, forKey: .codec) ?? .h264
         micEnabled = try container.decodeIfPresent(Bool.self, forKey: .micEnabled) ?? false

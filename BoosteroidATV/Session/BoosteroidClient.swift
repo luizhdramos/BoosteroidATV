@@ -371,6 +371,17 @@ actor BoosteroidClient {
         // is still alive — which is exactly the case we're trying to end.
         guard let details = try? await detailsIfReady(sessionId: sessionId, cookies: cookies),
               let nodeBaseUrl = details.nodeBaseUrl else { return false }
+        return await hangUpSession(sessionId: sessionId, nodeBaseUrl: nodeBaseUrl, cookies: cookies)
+    }
+
+    /// Same teardown, for callers that ALREADY know the node address — an
+    /// active stream does (`SessionInfo.nodeBaseUrl`). Skips the
+    /// `session/details` round-trip above, which is worth avoiding here: that
+    /// lookup can fail for a session that is mid-teardown, and failing it
+    /// means the hangup never gets sent at all. The Disconnect button uses
+    /// this variant.
+    @discardableResult
+    func hangUpSession(sessionId: String, nodeBaseUrl: String, cookies: [String: String]) async -> Bool {
         var comps = URLComponents(string: "\(nodeBaseUrl)/webrtc/api/hangup")!
         comps.queryItems = [
             URLQueryItem(name: "peerid", value: String(Double.random(in: 0..<1))),
