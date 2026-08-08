@@ -358,17 +358,21 @@ final class StreamController: NSObject {
     /// the device — a correct message that the server never received, which
     /// matches the symptom exactly.
     ///
-    /// Now it waits for the server to actually close the socket, which is the
-    /// real confirmation it acted on the terminate, and only falls back to a
-    /// bounded timeout if that never comes. Returns as soon as the close
-    /// lands, so a healthy teardown stays fast.
+    /// So it now waits after sending — but only briefly. CONFIRMED 2026-08-06
+    /// from the on-screen teardown report, twice: the server does NOT close
+    /// the socket in response to this message, so waiting on a close was
+    /// waiting for something that never comes and just added seconds of dead
+    /// time to every disconnect. The wait now exists purely to let the frames
+    /// flush before the socket is cancelled, and still returns immediately if
+    /// a close does happen to arrive.
+    ///
+    /// This message alone does not end the session either way — the node
+    /// `hangup` is what actually releases the machine. See StreamView's
+    /// endCloudSession, which runs both.
     func terminateSession() async {
         await controlChannel.send(type: "settings", action: "terminating")
         await controlChannel.send(type: "settings", action: "terminating")
-        let closed = await controlChannel.waitForClose(timeout: 2)
-        if !closed {
-            controlLog.append("terminate: server never closed the socket (2s)")
-        }
+        _ = await controlChannel.waitForClose(timeout: 0.4)
     }
 
     /// Whether the control socket has actually finished closing — see
