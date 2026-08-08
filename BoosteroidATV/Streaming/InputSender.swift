@@ -2,6 +2,13 @@ import CoreHaptics
 import Foundation
 import GameController
 
+extension Notification.Name {
+    /// Posted (main thread) on the rising edge of Start + Select being held
+    /// together on a gamepad — see InputSender.pollGamepad for why a combo is
+    /// needed at all. StreamView listens for this to open the options bar.
+    static let gamepadPauseComboPressed = Notification.Name("BoosteroidATV.gamepadPauseComboPressed")
+}
+
 // MARK: - Input Event Handler
 //
 // Same shape as CloudNow's InputEventHandler protocol so VideoSurfaceView's
@@ -136,6 +143,10 @@ final class InputSender: InputEventHandler {
     private var lastButtonState: [ObjectIdentifier: [Int: Bool]] = [:]
     private var lastAxisState: [ObjectIdentifier: [Int: Int]] = [:]
     private var lastHat: [ObjectIdentifier: Int] = [:]
+    /// Rising-edge tracking for the Start+Select options-bar combo. Separate
+    /// from lastButtonState because the combo is handled locally and must not
+    /// interfere with the individual button events still sent to the game.
+    private var lastPauseComboState: [ObjectIdentifier: Bool] = [:]
 
     /// Same threshold the real web client uses (`GamepadController.
     /// AXIS_THRESHOLD`) before re-sending an axis value, out of a ±32767
@@ -397,6 +408,7 @@ final class InputSender: InputEventHandler {
         lastButtonState.removeValue(forKey: key)
         lastAxisState.removeValue(forKey: key)
         lastHat.removeValue(forKey: key)
+        lastPauseComboState.removeValue(forKey: key)
         if let haptics = hapticsByController.removeValue(forKey: key) { haptics.stop() }
         // Extended gamepads only, matching handleControllerConnected — this
         // count feeds the on-screen diagnostics, so counting the Siri Remote
@@ -472,6 +484,26 @@ final class InputSender: InputEventHandler {
             }
         }
         lastButtonState[key] = buttonState
+
+        // Start + Select (Menu + Options) held together opens this app's own
+        // options bar. A standard gamepad has NO Play/Pause button — that's a
+        // Siri Remote button — while Menu/Start is deliberately forwarded to
+        // the game (button 7 above) and Home is reserved by tvOS at the OS
+        // level (confirmed on real hardware: it opens Control Center, the app
+        // never sees it). So before this there was no way whatsoever to reach
+        // the bar from a controller; the user could only do it from the Siri
+        // Remote.
+        //
+        // This classic emulator-style combo costs the game nothing: both
+        // buttons still pass through normally on their own (they're sent
+        // unconditionally in the loop above either way), and pressing both at
+        // once is hard to do by accident. Fires on the rising edge only, so
+        // holding the combo doesn't toggle the bar repeatedly.
+        let comboHeld = pad.buttonMenu.isPressed && (pad.buttonOptions?.isPressed ?? false)
+        if comboHeld, !(lastPauseComboState[key] ?? false) {
+            NotificationCenter.default.post(name: .gamepadPauseComboPressed, object: nil)
+        }
+        lastPauseComboState[key] = comboHeld
 
         // Axes 0-5 — CONFIRMED indices/range, see BoosteroidControlChannel.
         // GameController's Y axis is +1-up; the browser Gamepad API (and

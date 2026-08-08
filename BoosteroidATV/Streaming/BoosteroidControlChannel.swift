@@ -177,7 +177,10 @@ actor BoosteroidControlChannel {
     /// socket closes or errors.
     ///
     /// `devType=mobile` — CONFIRMED 2026-08-06 on real hardware: this is what
-    /// makes Boosteroid auto-launch Steam directly into BIG PICTURE mode.
+    /// makes Boosteroid auto-launch Steam into BIG PICTURE mode. Note it does
+    /// NOT happen for every game (verified by the user across several), so
+    /// this is a server-side per-title behavior, not a guarantee — nothing
+    /// user-facing should promise it.
     ///
     /// Boosteroid's server-side logic starts Steam in Big Picture for phone/TV
     /// clients but not for desktop ones. This client originally sent

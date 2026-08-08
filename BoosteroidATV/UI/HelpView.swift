@@ -20,7 +20,7 @@ struct HelpView: View {
         case introduction = "Introduction"
         case gettingStarted = "Getting Started"
         case controlMethods = "Control Methods"
-        case steam = "Steam Big Picture & Overlay"
+        case steam = "Steam Overlay"
         case duringGameplay = "During Gameplay"
         case configuration = "Configuration"
         case requirements = "Requirements & Limits"
@@ -48,22 +48,24 @@ struct HelpView: View {
                 return [
                     "• Game controller — MFi, Xbox, PlayStation, and Nintendo Switch pads. Buttons, triggers, sticks, and D-pad are all forwarded to the cloud PC.",
                     "• Siri Remote — navigates the app. During a stream, press Play/Pause to open the options bar.",
+                    "• Options bar from a controller — hold Start + Select together, since controllers have no Play/Pause button.",
                     "• On-screen keyboard — open it from the options bar to type into launchers, logins, or in-game chat.",
                     "• Pointer mode — turns the Siri Remote touch surface into a mouse, for launchers and desktop UI that a gamepad can't reach.",
                 ]
             case .steam:
                 return [
-                    "Sessions started from this app open Steam directly in Big Picture mode, the controller-friendly interface built for a TV.",
-                    "The Steam Overlay button in the options bar sends Shift+Tab to the cloud PC — the standard Steam overlay shortcut. The overlay is drawn inside the stream itself, so once it opens, use your controller as you normally would.",
+                    "The Steam Overlay button in the options bar sends Shift+Tab to the cloud PC — the standard Steam overlay shortcut.",
+                    "The overlay is drawn inside the stream itself, so once it opens, use your controller as you normally would.",
                 ]
             case .duringGameplay:
                 return [
-                    "Press Play/Pause on the Siri Remote or your controller to open the options bar. Press it again to close.",
+                    "To open the options bar: press Play/Pause on the Siri Remote, or hold Start + Select together on a game controller. Repeat to close it.",
+                    "Controllers have no Play/Pause button, which is why they use the Start + Select combo instead. Pressing either button on its own still goes to the game as normal.",
                     "• Disconnect — ends the cloud session and returns to the app.",
                     "• Keyboard — opens the on-screen keyboard.",
                     "• Pointer — uses the Siri Remote touch surface as a mouse.",
                     "• Steam Overlay — sends Shift+Tab to the cloud PC.",
-                    "• Performance Overlay — shows live bitrate, frame rate, latency, packet loss, and which server you're on.",
+                    "• Performance Overlay — shows live bitrate, frame rate, latency, and which server you're on.",
                 ]
             case .configuration:
                 return [
@@ -85,7 +87,7 @@ struct HelpView: View {
                 return [
                     "• Controller not responding — make sure the pad is paired in tvOS Settings → Remotes and Devices, not just powered on. If it still doesn't respond, disconnect and start the game again.",
                     "• Rumble not working — check that rumble is enabled in Settings. Some third-party pads running in a compatibility or Xbox emulation mode don't implement vibration at all, even though their buttons work fine.",
-                    "• Bitrate drops while playing — the server lowers quality when it detects packet loss or rising latency. Turn on the performance overlay: if latency and packet loss climb alongside the bitrate, it's a network condition rather than the app.",
+                    "• Bitrate drops while playing — the server lowers quality when it detects packet loss or rising latency. Turn on the performance overlay: if latency climbs as the bitrate falls, it's a network condition rather than the app.",
                     "• Long queue times — Boosteroid queues per region. Allowing distant regions in Settings gives you access to more machines.",
                     "• Black screen after connecting — disconnect and start the game again.",
                 ]

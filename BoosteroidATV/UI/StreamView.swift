@@ -148,21 +148,12 @@ struct StreamView: View {
                     // Focus must reach SwiftUI whenever an overlay is up, or the
                     // on-screen keyboard's keys can't be selected.
                     showOverlay: showOverlay || showKeyboard,
-                    // Play/Pause is now the ONLY way to open/close the bar:
-                    // closes the keyboard or Performance Overlay flyout
-                    // first if either is up, otherwise toggles the bar
-                    // itself both ways. Menu/Back keeps its natural system
-                    // behavior (dismiss back Home) instead; see
-                    // VideoSurfaceView.pressesBegan.
-                    onMenu: {
-                        if showKeyboard {
-                            showKeyboard = false
-                        } else if showPerformanceFlyout {
-                            showPerformanceFlyout = false
-                        } else {
-                            showOverlay.toggle()
-                        }
-                    },
+                    // Play/Pause (Siri Remote) opens/closes the bar: closes
+                    // the keyboard or Performance Overlay flyout first if
+                    // either is up, otherwise toggles the bar itself both
+                    // ways. On a gamepad the equivalent is Start+Select —
+                    // see the .gamepadPauseComboPressed handler below.
+                    onMenu: { togglePauseBar() },
                     pointerMode: pointerMode,
                     onPointerPosition: { localCursor = $0 },
                     // Pointer coordinates are in the REMOTE desktop's pixels, so
@@ -246,13 +237,27 @@ struct StreamView: View {
         // counterpart to pressesBegan's raw-input path, so together they
         // cover both states.
         .onPlayPauseCommand {
-            if showKeyboard {
-                showKeyboard = false
-            } else if showPerformanceFlyout {
-                showPerformanceFlyout = false
-            } else {
-                showOverlay.toggle()
-            }
+            togglePauseBar()
+        }
+        // The gamepad equivalent of Play/Pause. A standard controller has no
+        // Play/Pause button at all, so without this the bar was reachable
+        // only from the Siri Remote — see InputSender.pollGamepad for why
+        // Start+Select specifically.
+        .onReceive(NotificationCenter.default.publisher(for: .gamepadPauseComboPressed)) { _ in
+            togglePauseBar()
+        }
+    }
+
+    /// Shared by every route into the bar (Siri Remote Play/Pause via both
+    /// the raw-input and focus-system paths, and the gamepad combo) so they
+    /// can't drift apart.
+    private func togglePauseBar() {
+        if showKeyboard {
+            showKeyboard = false
+        } else if showPerformanceFlyout {
+            showPerformanceFlyout = false
+        } else {
+            showOverlay.toggle()
         }
     }
 
