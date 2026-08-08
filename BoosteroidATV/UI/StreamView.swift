@@ -314,6 +314,20 @@ struct StreamView: View {
         report += " | dequeue \(dequeue.status)"
         if dequeue.status != 204 { report += " \(dequeue.body)" }
 
+        // THE decisive check. Everything above can report success and still
+        // leave the machine bound, and "I reopened the game and it was where
+        // I left it" cannot tell that apart from "the session really ended,
+        // but reopening resumed a still-warm one" — createSession
+        // deliberately resumes a session whose details still answer 200 with
+        // a gateway. Asking the server directly, a moment after the teardown,
+        // settles it: still-alive means the teardown genuinely failed; gone
+        // means the teardown worked and the resume path is what brings the
+        // game back.
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let alive = await client.sessionAliveStatus(sessionId: session.sessionId, cookies: cookies)
+        report += " | after: details \(alive.status)"
+            + (alive.hasGateway ? " STILL ALIVE (gw present)" : " no gw — released")
+
         report += " | session \(session.sessionId.prefix(8))…"
         return report
     }

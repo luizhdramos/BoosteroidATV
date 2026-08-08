@@ -732,6 +732,21 @@ actor BoosteroidClient {
     /// assigned (session/details → 200 with a gw), or nil when still queued
     /// (406 "timeout") or transiently empty — i.e. "not ready yet, keep
     /// waiting". Only a genuinely unexpected response throws.
+    /// Asks the server, in its own words, whether a session is still alive.
+    /// 200 + a gateway means the machine is genuinely still bound to it; 406
+    /// is the "queued or gone" answer (see detailsIfReady). Used by the
+    /// Disconnect teardown report to tell "the teardown failed" apart from
+    /// "the teardown worked and something else resumed the session".
+    func sessionAliveStatus(sessionId: String, cookies: [String: String]) async -> (status: Int, hasGateway: Bool) {
+        let url = URL(string: "\(apiBase)/v1/streaming/session/details?sessionId=\(sessionId)")!
+        let req = authenticatedRequest(url, cookies: cookies, method: "POST")
+        guard let (data, response) = try? await session.data(for: req) else { return (0, false) }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let dto = try? JSONDecoder().decode(BoosteroidSessionDetailsSuccessDTO.self, from: data)
+        let gw = dto?.data.gwAddress ?? ""
+        return (status, !gw.isEmpty)
+    }
+
     private func detailsIfReady(sessionId: String, cookies: [String: String]) async throws -> SessionInfo? {
         let url = URL(string: "\(apiBase)/v1/streaming/session/details?sessionId=\(sessionId)")!
         let req = authenticatedRequest(url, cookies: cookies, method: "POST")
