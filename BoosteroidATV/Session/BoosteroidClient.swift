@@ -345,20 +345,11 @@ actor BoosteroidClient {
     /// — as opposed to just a queue slot — has not been verified.
     @discardableResult
     func dequeue(cookies: [String: String]) async -> Bool {
-        await dequeueStatus(cookies: cookies).status == 204
-    }
-
-    /// Same call, but reports the HTTP status and body excerpt instead of a
-    /// bare Bool — the Disconnect button surfaces these so a failed teardown
-    /// says WHY rather than just silently leaving the session running.
-    /// Status 0 means the request never completed at all.
-    func dequeueStatus(cookies: [String: String]) async -> (status: Int, body: String) {
         let url = URL(string: "\(apiBase)/v2/streaming/session/dequeue")!
         var req = authenticatedRequest(url, cookies: cookies, method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        guard let (data, response) = try? await session.data(for: req) else { return (0, "no response") }
-        return ((response as? HTTPURLResponse)?.statusCode ?? 0,
-                String(data: data.prefix(120), encoding: .utf8) ?? "")
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 204
     }
 
     /// Tears a LIVE session down on its own streaming node.
@@ -389,38 +380,27 @@ actor BoosteroidClient {
     /// lookup can fail for a session that is mid-teardown, and failing it
     /// means the hangup never gets sent at all. The Disconnect button uses
     /// this variant.
+    /// `peerId` MUST be the one the live signaling session used. CONFIRMED
+    /// 2026-08-06 on real hardware: passing a fresh random value made the node
+    /// answer 500. That fits how `hangup` works in the webrtc-streamer project
+    /// this API mirrors — it tears down the peer connection identified BY that
+    /// id, so an id the node has never seen names nothing. Callers with no
+    /// live signaling session (e.g. releasing a previous session when
+    /// switching games) have no real id to pass and fall back to a random one,
+    /// which is expected to keep failing — see
+    /// StreamController.signalingPeerId for the id that works.
     @discardableResult
     func hangUpSession(sessionId: String, nodeBaseUrl: String, cookies: [String: String],
                        peerId: String? = nil) async -> Bool {
-        let result = await hangUpSessionStatus(sessionId: sessionId, nodeBaseUrl: nodeBaseUrl,
-                                               cookies: cookies, peerId: peerId)
-        return (200...299).contains(result.status)
-    }
-
-    /// Status-reporting variant, for the same reason as `dequeueStatus`.
-    /// Status 0 means the request never completed at all.
-    ///
-    /// `peerId` MUST be the one the live signaling session used. CONFIRMED
-    /// 2026-08-06 by the on-screen teardown report: passing a fresh random
-    /// value made the node answer 500. That fits how `hangup` works in the
-    /// webrtc-streamer project this API mirrors — it tears down the peer
-    /// connection identified BY that id, so an id the node has never seen
-    /// names nothing. Callers with no live signaling session (e.g. releasing
-    /// a previous session when switching games) have no real id to pass and
-    /// fall back to a random one, which is expected to keep failing —
-    /// see StreamController.signalingPeerId for the id that works.
-    func hangUpSessionStatus(sessionId: String, nodeBaseUrl: String, cookies: [String: String],
-                             peerId: String? = nil) async -> (status: Int, body: String) {
         var comps = URLComponents(string: "\(nodeBaseUrl)/webrtc/api/hangup")!
         comps.queryItems = [
             URLQueryItem(name: "peerid", value: peerId ?? String(Double.random(in: 0..<1))),
             URLQueryItem(name: "sessionId", value: sessionId),
         ]
-        guard let url = comps.url else { return (0, "bad url") }
+        guard let url = comps.url else { return false }
         let req = authenticatedRequest(url, cookies: cookies, method: "POST")
-        guard let (data, response) = try? await session.data(for: req) else { return (0, "no response") }
-        return ((response as? HTTPURLResponse)?.statusCode ?? 0,
-                String(data: data.prefix(120), encoding: .utf8) ?? "")
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        return (200...299).contains((response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 
     /// Claims the machine once the queue clears — THE step that turns a queued

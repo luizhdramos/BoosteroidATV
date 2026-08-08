@@ -73,22 +73,6 @@ final class StreamController: NSObject {
     private var lastBytesReceived = 0
     private var lastFramesReceivedSample = 0
     private var lastFramesDecodedSample = 0
-    // Controller input diagnostics (mirrored from InputSender each stats tick)
-    // so the HUD can show whether a pad is seen, whether frames are being
-    // sent, and whether the server acked the controller handshake.
-    private(set) var controllerCount = 0
-    private(set) var controllerEventsSent = 0
-    private(set) var controllerAckId: String = "-"
-    /// DIAGNOSTIC (added 2026-08-09) — see InputSender's matching properties'
-    /// doc comments. Mirrored here purely to get them onto the Performance
-    /// Overlay while chasing down why rumble doesn't do anything.
-    private(set) var rumbleMessagesReceived = 0
-    private(set) var rumbleHapticsAvailable: Bool?
-    private(set) var rumbleSetupError: String?
-    private(set) var rumbleLastLeft: Double = 0
-    private(set) var rumbleLastRight: Double = 0
-    private(set) var rumbleSupportedLocalities: String = "-"
-    private(set) var rumbleSendError: String?
     /// Cursor position reported by the server, in remote-desktop pixels.
     /// nil until (or unless) the server sends one — see the `.cursor` note in
     /// BoosteroidControlChannel.
@@ -568,19 +552,6 @@ final class StreamController: NSObject {
                 self.lastFramesReceivedSample = framesRx
                 self.lastFramesDecodedSample = frames
                 if rttSeconds >= 0 { self.rttMs = Int((rttSeconds * 1000).rounded()) }
-
-                if let sender = self.inputSender {
-                    self.controllerCount = sender.connectedControllerCount
-                    self.controllerEventsSent = sender.controllerEventsSent
-                    self.controllerAckId = sender.lastServerAckId ?? "none(provisional)"
-                    self.rumbleMessagesReceived = sender.rumbleMessagesReceived
-                    self.rumbleHapticsAvailable = sender.rumbleHapticsAvailable
-                    self.rumbleSetupError = sender.rumbleSetupError
-                    self.rumbleLastLeft = sender.rumbleLastLeft
-                    self.rumbleLastRight = sender.rumbleLastRight
-                    self.rumbleSupportedLocalities = sender.rumbleSupportedLocalities
-                    self.rumbleSendError = sender.rumbleSendError
-                }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }

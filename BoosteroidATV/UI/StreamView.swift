@@ -284,7 +284,7 @@ struct StreamView: View {
     ///     web client's own End Session flow.
     ///  2. `hangup` on the streaming node, tearing down the WebRTC peer.
     ///     Must carry THIS session's signaling peerid or the node answers 500
-    ///     — see BoosteroidClient.hangUpSessionStatus.
+    ///     — see BoosteroidClient.hangUpSession.
     ///  3. `dequeue`, releasing the queue slot.
     ///
     /// IMPORTANT, and verified end-to-end 2026-08-06 rather than assumed:
