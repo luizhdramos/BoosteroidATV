@@ -375,13 +375,6 @@ final class StreamController: NSObject {
         _ = await controlChannel.waitForClose(timeout: 0.4)
     }
 
-    /// Whether the control socket has actually finished closing — see
-    /// terminateSession, which waits on it. Exposed for the Disconnect
-    /// button's teardown diagnostics.
-    var controlChannelClosed: Bool {
-        get async { await controlChannel.didClose }
-    }
-
     /// The `peerid` this session's WebRTC signaling actually used. Session
     /// teardown needs it: `hangup` tears down the peer connection NAMED by
     /// this id, so anything else is a no-op at best.

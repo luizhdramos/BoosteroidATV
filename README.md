@@ -86,7 +86,7 @@ Type your email and password on the Apple TV — no browser, no second device. T
 This is an **experimental, independently-built** client. The core loop — sign in, list library, launch a game standalone (fresh queue or resume), stream video/audio, and send controller input (including rumble) — has been verified end-to-end against a real, paying account. Known constraints:
 
 - **H.264 only.** Boosteroid's WebRTC path only offers H.264. H.265/HEVC and AV1 are delivered exclusively over Boosteroid's native UDP transport, which this client does not implement. (Apple TV can decode HEVC, so this is a service-side limitation, not a device one.)
-- **Session termination not yet confirmed.** The Disconnect button closes the local connection; whether it also reliably ends the session on Boosteroid's side hasn't been validated yet.
+- **Disconnecting doesn't free the machine right away.** The Disconnect button ends the session the same way Boosteroid's own clients do, but the machine is kept warm for a while afterwards — so reconnecting soon after resumes the running game instead of starting fresh. The official macOS client behaves identically; it's a service behavior, not an app limitation.
 - **No catalog browsing yet.** Home shows your installed library as a grid; there's no search, store browsing, or "Continue Playing"/Favorites rows yet.
 
 ## Roadmap

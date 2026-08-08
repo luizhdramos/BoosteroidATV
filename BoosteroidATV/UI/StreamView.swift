@@ -101,8 +101,6 @@ struct StreamView: View {
     /// finishes — see the Disconnect button, which now waits for the server
     /// to acknowledge the terminate.
     @State private var isDisconnecting = false
-    /// DIAGNOSTIC: what each teardown step actually did — see endCloudSession.
-    @State private var teardownReport: String?
 
     var body: some View {
         ZStack {
@@ -278,72 +276,45 @@ struct StreamView: View {
     /// `session/details`, which can fail for a session that's mid-teardown.
     /// All of it is best-effort — nothing here should be able to trap the
     /// user in the stream if a call fails.
-    /// DIAGNOSTIC (2026-08-06): two evidence-based fixes have now failed to
-    /// end the session (the captured `settings/terminating` socket message,
-    /// then the node `hangup` + `dequeue` pair that createSession itself uses
-    /// to free a machine when switching games). Rather than guess a third
-    /// time, this reports exactly what each step did so the next attempt
-    /// produces evidence: whether the socket actually closed, and the real
-    /// HTTP status of each REST call. `teardownReport` is rendered in the bar
-    /// before dismissing. Remove this once the cause is known.
-    @discardableResult
-    private func endCloudSession() async -> String {
+    /// Ends the session on Boosteroid's side — everything except this
+    /// device's own local teardown, which the caller does afterwards.
+    ///
+    /// Sends all three teardown steps the real clients use:
+    ///  1. `settings/terminating` on the control socket — captured from the
+    ///     web client's own End Session flow.
+    ///  2. `hangup` on the streaming node, tearing down the WebRTC peer.
+    ///     Must carry THIS session's signaling peerid or the node answers 500
+    ///     — see BoosteroidClient.hangUpSessionStatus.
+    ///  3. `dequeue`, releasing the queue slot.
+    ///
+    /// IMPORTANT, and verified end-to-end 2026-08-06 rather than assumed:
+    /// none of this frees the machine immediately, and that is Boosteroid's
+    /// behavior, not a bug here. Instrumenting each step showed all three
+    /// succeeding (hangup 200, dequeue 204) while `session/details` still
+    /// answered with a gateway right afterwards. The official macOS client
+    /// behaves identically — ending a session there and immediately
+    /// reopening lands back in the running game — which also matches the note
+    /// recorded when the web client's End Session flow was first captured:
+    /// `last-session` still reported "LI" straight after confirming it. The
+    /// machine is deliberately kept warm for a while, so reconnecting soon
+    /// after resumes the game rather than starting fresh.
+    ///
+    /// So don't read "the game is still where I left it" as this failing.
+    /// All of it is best-effort; nothing here should trap the user in the
+    /// stream if a call fails.
+    private func endCloudSession() async {
         await controller.terminateSession()
-        var report = "socket-close: \(await controller.controlChannelClosed ? "yes" : "NO")"
 
-        guard let session = controller.sessionInfo, !session.sessionId.isEmpty else {
-            return report + " | no sessionId — REST teardown skipped entirely"
-        }
-        guard let cookies = try? await authManager.resolveCookies() else {
-            return report + " | no cookies — REST teardown skipped entirely"
-        }
+        guard let session = controller.sessionInfo,
+              !session.sessionId.isEmpty,
+              let cookies = try? await authManager.resolveCookies() else { return }
 
         if let node = session.nodeBaseUrl ?? claimedGateway {
-            // Must be THIS session's signaling peerid — see
-            // BoosteroidClient.hangUpSessionStatus.
-            let hangup = await client.hangUpSessionStatus(
+            await client.hangUpSession(
                 sessionId: session.sessionId, nodeBaseUrl: node, cookies: cookies,
                 peerId: controller.signalingPeerId)
-            report += " | hangup \(hangup.status)"
-            if !(200...299).contains(hangup.status) { report += " \(hangup.body)" }
-        } else {
-            report += " | hangup SKIPPED (no node host)"
         }
-
-        let dequeue = await client.dequeueStatus(cookies: cookies)
-        report += " | dequeue \(dequeue.status)"
-        if dequeue.status != 204 { report += " \(dequeue.body)" }
-
-        // THE decisive check. Everything above can report success and still
-        // leave the machine bound, and "I reopened the game and it was where
-        // I left it" cannot tell that apart from "the session really ended,
-        // but reopening resumed a still-warm one" — createSession
-        // deliberately resumes a session whose details still answer 200 with
-        // a gateway. Asking the server directly, a moment after the teardown,
-        // settles it: still-alive means the teardown genuinely failed; gone
-        // means the teardown worked and the resume path is what brings the
-        // game back.
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
-        var alive = await client.sessionAliveStatus(sessionId: session.sessionId, cookies: cookies)
-        report += " | after: details \(alive.status)"
-            + (alive.hasGateway ? " STILL ALIVE" : " no gw — released")
-
-        // CONFIRMED still alive after all three known teardown calls, so look
-        // for an endpoint that actually releases the machine — see
-        // BoosteroidClient.probeSessionStop for why this is worth probing
-        // rather than trusting the recorded "no such endpoint" conclusion.
-        if alive.hasGateway {
-            let probe = await client.probeSessionStop(
-                sessionId: session.sessionId, appId: Int(game.id), cookies: cookies)
-            report += "\nprobe: " + probe
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            alive = await client.sessionAliveStatus(sessionId: session.sessionId, cookies: cookies)
-            report += " | now: details \(alive.status)"
-                + (alive.hasGateway ? " STILL ALIVE" : " RELEASED")
-        }
-
-        report += " | session \(session.sessionId.prefix(8))…"
-        return report
+        await client.dequeue(cookies: cookies)
     }
 
     /// Shared by every route into the bar (Siri Remote Play/Pause via both
@@ -490,12 +461,7 @@ struct StreamView: View {
                     guard !isDisconnecting else { return }
                     isDisconnecting = true
                     Task {
-                        // DIAGNOSTIC: hold the report on screen briefly before
-                        // leaving, so a failed teardown is visible instead of
-                        // silently bouncing back to the menu. See
-                        // endCloudSession.
-                        teardownReport = await endCloudSession()
-                        try? await Task.sleep(nanoseconds: 6_000_000_000)
+                        await endCloudSession()
                         controller.disconnect()
                         onDismiss()
                     }
@@ -555,19 +521,6 @@ struct StreamView: View {
             // true screen edges — the button row itself stays padded/inset
             // via the .padding(.horizontal, 32) above.
             .background(Color.black.opacity(0.85).ignoresSafeArea(edges: [.top, .horizontal]))
-
-            // DIAGNOSTIC: what the teardown actually did, held on screen for a
-            // few seconds before dismissing. See endCloudSession.
-            if let teardownReport {
-                Text(teardownReport)
-                    .font(.system(size: 18, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.leading)
-                    .padding(16)
-                    .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 32)
-                    .padding(.top, 12)
-            }
 
             if showPerformanceFlyout {
                 HStack {

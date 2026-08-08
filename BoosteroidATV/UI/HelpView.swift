@@ -61,7 +61,7 @@ struct HelpView: View {
                 return [
                     "To open the options bar: press Play/Pause on the Siri Remote, or hold Start + Select together on a game controller. Repeat to close it.",
                     "Controllers have no Play/Pause button, which is why they use the Start + Select combo instead. Pressing either button on its own still goes to the game as normal.",
-                    "• Disconnect — ends the cloud session and returns to the app.",
+                    "• Disconnect — ends the cloud session and returns to the app. Boosteroid keeps your machine warm for a while afterwards, so reconnecting soon after picks the game back up where you left it.",
                     "• Keyboard — opens the on-screen keyboard.",
                     "• Pointer — uses the Siri Remote touch surface as a mouse.",
                     "• Steam Overlay — sends Shift+Tab to the cloud PC.",
