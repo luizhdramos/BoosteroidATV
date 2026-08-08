@@ -371,6 +371,13 @@ final class StreamController: NSObject {
         }
     }
 
+    /// Whether the control socket has actually finished closing — see
+    /// terminateSession, which waits on it. Exposed for the Disconnect
+    /// button's teardown diagnostics.
+    var controlChannelClosed: Bool {
+        get async { await controlChannel.didClose }
+    }
+
     func disconnect() {
         statsTask?.cancel()
         statsTask = nil

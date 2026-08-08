@@ -101,6 +101,8 @@ struct StreamView: View {
     /// finishes — see the Disconnect button, which now waits for the server
     /// to acknowledge the terminate.
     @State private var isDisconnecting = false
+    /// DIAGNOSTIC: what each teardown step actually did — see endCloudSession.
+    @State private var teardownReport: String?
 
     var body: some View {
         ZStack {
@@ -276,17 +278,41 @@ struct StreamView: View {
     /// `session/details`, which can fail for a session that's mid-teardown.
     /// All of it is best-effort — nothing here should be able to trap the
     /// user in the stream if a call fails.
-    private func endCloudSession() async {
+    /// DIAGNOSTIC (2026-08-06): two evidence-based fixes have now failed to
+    /// end the session (the captured `settings/terminating` socket message,
+    /// then the node `hangup` + `dequeue` pair that createSession itself uses
+    /// to free a machine when switching games). Rather than guess a third
+    /// time, this reports exactly what each step did so the next attempt
+    /// produces evidence: whether the socket actually closed, and the real
+    /// HTTP status of each REST call. `teardownReport` is rendered in the bar
+    /// before dismissing. Remove this once the cause is known.
+    @discardableResult
+    private func endCloudSession() async -> String {
         await controller.terminateSession()
+        var report = "socket-close: \(await controller.controlChannelClosed ? "yes" : "NO")"
 
-        guard let session = controller.sessionInfo,
-              !session.sessionId.isEmpty,
-              let cookies = try? await authManager.resolveCookies() else { return }
+        guard let session = controller.sessionInfo, !session.sessionId.isEmpty else {
+            return report + " | no sessionId — REST teardown skipped entirely"
+        }
+        guard let cookies = try? await authManager.resolveCookies() else {
+            return report + " | no cookies — REST teardown skipped entirely"
+        }
 
         if let node = session.nodeBaseUrl ?? claimedGateway {
-            await client.hangUpSession(sessionId: session.sessionId, nodeBaseUrl: node, cookies: cookies)
+            let hangup = await client.hangUpSessionStatus(
+                sessionId: session.sessionId, nodeBaseUrl: node, cookies: cookies)
+            report += " | hangup \(hangup.status)"
+            if !(200...299).contains(hangup.status) { report += " \(hangup.body)" }
+        } else {
+            report += " | hangup SKIPPED (no node host)"
         }
-        await client.dequeue(cookies: cookies)
+
+        let dequeue = await client.dequeueStatus(cookies: cookies)
+        report += " | dequeue \(dequeue.status)"
+        if dequeue.status != 204 { report += " \(dequeue.body)" }
+
+        report += " | session \(session.sessionId.prefix(8))…"
+        return report
     }
 
     /// Shared by every route into the bar (Siri Remote Play/Pause via both
@@ -433,7 +459,12 @@ struct StreamView: View {
                     guard !isDisconnecting else { return }
                     isDisconnecting = true
                     Task {
-                        await endCloudSession()
+                        // DIAGNOSTIC: hold the report on screen briefly before
+                        // leaving, so a failed teardown is visible instead of
+                        // silently bouncing back to the menu. See
+                        // endCloudSession.
+                        teardownReport = await endCloudSession()
+                        try? await Task.sleep(nanoseconds: 6_000_000_000)
                         controller.disconnect()
                         onDismiss()
                     }
@@ -493,6 +524,19 @@ struct StreamView: View {
             // true screen edges — the button row itself stays padded/inset
             // via the .padding(.horizontal, 32) above.
             .background(Color.black.opacity(0.85).ignoresSafeArea(edges: [.top, .horizontal]))
+
+            // DIAGNOSTIC: what the teardown actually did, held on screen for a
+            // few seconds before dismissing. See endCloudSession.
+            if let teardownReport {
+                Text(teardownReport)
+                    .font(.system(size: 18, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.leading)
+                    .padding(16)
+                    .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 32)
+                    .padding(.top, 12)
+            }
 
             if showPerformanceFlyout {
                 HStack {
