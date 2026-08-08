@@ -26,7 +26,7 @@ It is built in the same spirit as its sibling project **[CloudNow](https://githu
 - **Full input support** — MFi / Xbox / PlayStation / Nintendo Switch game controllers, forwarded to the cloud PC over Boosteroid's control channel. Controller mapping (buttons, triggers, sticks, D-pad) is matched byte-for-byte to the official client.
 - **Controller rumble** — real vibration via CoreHaptics/GameController, confirmed working end to end on real hardware (Nintendo Switch Pro Controller). Toggle on/off and pick an intensity (Automatic, Weak, Medium, Strong, Very Strong) in Settings. Whether rumble actually works depends on the controller: some third-party "compatibility mode" pads (e.g. clones running in an emulated Xbox mode) don't implement the vibration side of that mode even though buttons work fine — that's a controller/firmware limitation, not something the app can fix.
 - **Server / region selection** — mirrors cloud.boosteroid.com's account settings: a toggle to allow connecting to distant regions, and a dropdown to pick a preferred server location (or Automatic). The server you actually connected to is shown while streaming.
-- **Quality settings** — resolution (720p / 1080p / 1440p / 4K), frame rate (30 / 60 / 120 fps), automatic or manual bitrate, and an analog-stick deadzone slider.
+- **Quality settings** — resolution (720p / 1080p / 1440p / 4K), frame rate (60 / 120 fps), automatic or manual bitrate, and an analog-stick deadzone slider.
 - **Optional performance overlay** — a compact, opt-in HUD showing bitrate, stream FPS, network latency, and which server you're on.
 
 ## How it works

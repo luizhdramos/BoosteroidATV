@@ -19,7 +19,6 @@ protocol InputEventHandler: AnyObject {
     /// Absolute pointer position, in the streamed surface's pixels.
     func sendMouseAbsolute(x: Int, y: Int)
     func sendMouseButton(down: Bool, button: UInt8)
-    func sendMouseWheel(delta: Int16)
 }
 
 // MARK: - Input Sender
@@ -346,11 +345,6 @@ final class InputSender: InputEventHandler {
         ]) }
     }
 
-    func sendMouseWheel(delta: Int16) {
-        Task { [controlChannel] in await controlChannel.send(type: "mouse", action: "wheel", fields: [
-            "deltaY": delta > 0 ? 1 : -1,
-        ]) }
-    }
 
     // MARK: - Controller Connect / Disconnect
 

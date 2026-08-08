@@ -69,10 +69,10 @@ struct HelpView: View {
                 ]
             case .configuration:
                 return [
-                    "• Stream quality — resolution from 720p to 4K, and 30, 60, or 120 fps.",
+                    "• Stream quality — resolution from 720p to 4K, and 60 or 120 fps.",
                     "• Bitrate — automatic, or a manual ceiling if you'd rather cap it yourself.",
                     "• Controller — analog stick deadzone, plus rumble on/off and its intensity.",
-                    "• Overlay — turns the performance overlay on by default.",
+                    "• Overlay — the performance overlay is off by default; turn it on here to have it show in every stream. You can also toggle it for the current session from the options bar.",
                     "• Region — allow connections to distant regions, and pick a preferred server location. Allowing distant regions widens the pool of machines but can add latency.",
                     "Quality and region changes take effect the next time you start a game, not mid-session.",
                 ]

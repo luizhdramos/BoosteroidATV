@@ -251,8 +251,6 @@ nonisolated struct SessionInfo {
     /// (keyboard/mouse/controller), not just informative metadata. See
     /// BoosteroidControlChannel's header comment for the full protocol.
     var queryString: String? = nil
-
-    var isInQueue: Bool { status == "EN" }
 }
 
 /// CONFIRMED shape of `GET /api/v1/streaming/user/last-session`'s `data`

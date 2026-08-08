@@ -33,9 +33,6 @@ final class VideoSurfaceView: UIView {
     /// the cursor to a known corner on activation (see calibratePointer).
     var pointerPositionHandler: ((CGPoint) -> Void)?
 
-    /// When true, an extended gamepad owns input.
-    var gamepadModeActive = false
-
     /// When true, the Siri Remote's touch surface drives the mouse pointer and
     /// the centre click sends a left button. Off by default so the remote keeps
     /// behaving as a gamepad for normal play.

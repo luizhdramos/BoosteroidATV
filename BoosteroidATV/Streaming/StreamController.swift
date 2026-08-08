@@ -19,10 +19,6 @@ struct StreamStats {
     var bitrateKbps: Int = 0
     var resolutionWidth: Int = 0
     var resolutionHeight: Int = 0
-    var fps: Double = 0
-    var rttMs: Double = 0
-    var packetLossPercent: Double = 0
-    var codec: String = ""
 }
 
 // MARK: - StreamController
@@ -56,23 +52,13 @@ final class StreamController: NSObject {
     /// media) from "fully connected".
     private(set) var peerConnState: String = "new"
     private(set) var dataChannelState: String = "-"
-    private(set) var gotVideoTrack = false
-    private(set) var framesDecoded = 0
-    // Extra decode diagnostics to tell "packets arriving but not assembled"
-    // from "frames assembled but not decoding" (codec/keyframe issue).
-    private(set) var framesReceived = 0
-    private(set) var keyFramesDecoded = 0
-    private(set) var packetsReceived = 0
-    private(set) var codecName = "?"
     // Per-second rates for the overlay: Stream FPS = frames arriving from the
-    // server, Decode FPS = frames the local hardware decodes, RTT = network
-    // round-trip. Computed as deltas across the ~1s stats tick.
+    // server, RTT = network round-trip. Computed as deltas across the ~1s
+    // stats tick.
     private(set) var streamFps = 0
-    private(set) var decodeFps = 0
     private(set) var rttMs = 0
     private var lastBytesReceived = 0
     private var lastFramesReceivedSample = 0
-    private var lastFramesDecodedSample = 0
     /// Cursor position reported by the server, in remote-desktop pixels.
     /// nil until (or unless) the server sends one — see the `.cursor` note in
     /// BoosteroidControlChannel.
@@ -496,18 +482,17 @@ final class StreamController: NSObject {
                 // Async getStats — no completion closure, so no nested Task and
                 // nothing captured off the main actor. Parse the standard
                 // inbound-rtp video stats inline.
+                // Only what the performance overlay actually shows: bitrate,
+                // stream FPS, latency, and the decoded size (which also keeps
+                // the absolute-pointer math honest). Decoded/key-frame/packet
+                // counters and the codec name used to be collected here too,
+                // but nothing ever read them.
                 let report = await pc.statistics()
-                var frames = 0, bytes = 0, w = 0, h = 0
-                var framesRx = 0, keyFrames = 0, packets = 0
-                var fps = 0.0
-                var codecId = ""
-                var codecs: [String: String] = [:]
+                var bytes = 0, w = 0, h = 0
+                var framesRx = 0
                 var rttSeconds: Double = -1
                 for (_, stat) in report.statistics {
                     let v = stat.values
-                    if stat.type == "codec", let mime = v["mimeType"] as? String {
-                        codecs[stat.id] = mime
-                    }
                     // Network RTT from the active ICE candidate pair.
                     if stat.type == "candidate-pair",
                        (v["nominated"] as? NSNumber)?.boolValue == true || (v["state"] as? String) == "succeeded",
@@ -517,20 +502,14 @@ final class StreamController: NSObject {
                     guard stat.type == "inbound-rtp" else { continue }
                     let kind = (v["kind"] as? String) ?? (v["mediaType"] as? String) ?? ""
                     guard kind == "video" else { continue }
-                    frames = (v["framesDecoded"] as? NSNumber)?.intValue ?? frames
                     framesRx = (v["framesReceived"] as? NSNumber)?.intValue ?? framesRx
-                    keyFrames = (v["keyFramesDecoded"] as? NSNumber)?.intValue ?? keyFrames
-                    packets = (v["packetsReceived"] as? NSNumber)?.intValue ?? packets
-                    fps = (v["framesPerSecond"] as? NSNumber)?.doubleValue ?? fps
                     w = (v["frameWidth"] as? NSNumber)?.intValue ?? w
                     h = (v["frameHeight"] as? NSNumber)?.intValue ?? h
                     bytes = (v["bytesReceived"] as? NSNumber)?.intValue ?? bytes
-                    codecId = (v["codecId"] as? String) ?? codecId
                 }
                 let delta = max(0, bytes - self.lastBytesReceived)
                 self.lastBytesReceived = bytes
                 self.stats.bitrateKbps = delta * 8 / 1000
-                self.stats.fps = fps
                 self.stats.resolutionWidth = w
                 self.stats.resolutionHeight = h
                 // Keep the absolute-pointer math in step with the ACTUAL
@@ -539,18 +518,10 @@ final class StreamController: NSObject {
                 // on the requested value for the whole session (see
                 // updateSurfaceSize's doc comment).
                 self.inputSender?.updateSurfaceSize(width: w, height: h)
-                self.framesDecoded = frames
-                self.framesReceived = framesRx
-                self.keyFramesDecoded = keyFrames
-                self.packetsReceived = packets
-                self.codecName = codecs[codecId] ?? (codecId.isEmpty ? "?" : codecId)
 
-                // Per-second rates (tick is ~1s): frames received from the
-                // server vs. frames decoded locally.
+                // Per-second rate (tick is ~1s): frames received from the server.
                 self.streamFps = max(0, framesRx - self.lastFramesReceivedSample)
-                self.decodeFps = max(0, frames - self.lastFramesDecodedSample)
                 self.lastFramesReceivedSample = framesRx
-                self.lastFramesDecodedSample = frames
                 if rttSeconds >= 0 { self.rttMs = Int((rttSeconds * 1000).rounded()) }
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -597,7 +568,6 @@ extension StreamController: LKRTCPeerConnectionDelegate {
         Task { @MainActor in
             self.videoTrack = track
             self.videoView?.videoTrack = track
-            self.gotVideoTrack = true
             self.watchdogTasks.forEach { $0.cancel() }
             self.watchdogTasks = []
             self.stage = ""

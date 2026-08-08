@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Security
 
@@ -39,36 +38,6 @@ nonisolated enum BoosteroidAuth {
     // different browser, change this string to match it (real 401s have been
     // traced to a Safari UA here being paired with Chrome-issued cookies).
     static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-}
-
-// MARK: - PKCE Helpers
-//
-// Kept in case Boosteroid's login turns out to be a standard OAuth/OIDC
-// authorization-code + PKCE flow (common for web-based cloud gaming logins).
-// Unused until that's confirmed.
-
-nonisolated struct PKCE {
-    let verifier: String
-    let challenge: String
-
-    static func generate() -> PKCE {
-        var bytes = [UInt8](repeating: 0, count: 64)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        let verifier = Data(bytes)
-            .base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-            .prefix(86)
-        let verifierStr = String(verifier)
-        let challengeData = SHA256.hash(data: Data(verifierStr.utf8))
-        let challenge = Data(challengeData)
-            .base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-        return PKCE(verifier: verifierStr, challenge: challenge)
-    }
 }
 
 // MARK: - Keychain
