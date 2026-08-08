@@ -299,8 +299,11 @@ struct StreamView: View {
         }
 
         if let node = session.nodeBaseUrl ?? claimedGateway {
+            // Must be THIS session's signaling peerid — see
+            // BoosteroidClient.hangUpSessionStatus.
             let hangup = await client.hangUpSessionStatus(
-                sessionId: session.sessionId, nodeBaseUrl: node, cookies: cookies)
+                sessionId: session.sessionId, nodeBaseUrl: node, cookies: cookies,
+                peerId: controller.signalingPeerId)
             report += " | hangup \(hangup.status)"
             if !(200...299).contains(hangup.status) { report += " \(hangup.body)" }
         } else {

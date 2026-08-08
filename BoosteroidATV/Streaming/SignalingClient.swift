@@ -90,7 +90,11 @@ final class BoosteroidSignalingClient {
     private let nodeBaseUrl: String
     private let sessionId: String
     private let cookies: [String: String]
-    private let peerId: String = String(Double.random(in: 0..<1))
+    /// Readable so session teardown can hang up THIS peer connection.
+    /// `hangup` identifies the connection to tear down by `peerid`, so it has
+    /// to be this exact value — passing a fresh random one names a peer the
+    /// node has never heard of, which is what made it answer 500.
+    let peerId: String = String(Double.random(in: 0..<1))
 
     private let session: URLSession = {
         let config = URLSessionConfiguration.default

@@ -378,6 +378,11 @@ final class StreamController: NSObject {
         get async { await controlChannel.didClose }
     }
 
+    /// The `peerid` this session's WebRTC signaling actually used. Session
+    /// teardown needs it: `hangup` tears down the peer connection NAMED by
+    /// this id, so anything else is a no-op at best.
+    var signalingPeerId: String? { signaling?.peerId }
+
     func disconnect() {
         statsTask?.cancel()
         statsTask = nil
