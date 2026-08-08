@@ -324,9 +324,22 @@ struct StreamView: View {
         // means the teardown worked and the resume path is what brings the
         // game back.
         try? await Task.sleep(nanoseconds: 1_500_000_000)
-        let alive = await client.sessionAliveStatus(sessionId: session.sessionId, cookies: cookies)
+        var alive = await client.sessionAliveStatus(sessionId: session.sessionId, cookies: cookies)
         report += " | after: details \(alive.status)"
-            + (alive.hasGateway ? " STILL ALIVE (gw present)" : " no gw — released")
+            + (alive.hasGateway ? " STILL ALIVE" : " no gw — released")
+
+        // CONFIRMED still alive after all three known teardown calls, so look
+        // for an endpoint that actually releases the machine — see
+        // BoosteroidClient.probeSessionStop for why this is worth probing
+        // rather than trusting the recorded "no such endpoint" conclusion.
+        if alive.hasGateway {
+            report += "\nprobe: " + await client.probeSessionStop(
+                sessionId: session.sessionId, appId: Int(game.id), cookies: cookies)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            alive = await client.sessionAliveStatus(sessionId: session.sessionId, cookies: cookies)
+            report += " | now: details \(alive.status)"
+                + (alive.hasGateway ? " STILL ALIVE" : " RELEASED")
+        }
 
         report += " | session \(session.sessionId.prefix(8))…"
         return report

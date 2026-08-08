@@ -732,6 +732,61 @@ actor BoosteroidClient {
     /// assigned (session/details → 200 with a gw), or nil when still queued
     /// (406 "timeout") or transiently empty — i.e. "not ready yet, keep
     /// waiting". Only a genuinely unexpected response throws.
+    /// Probes for a REST teardown endpoint, stopping at the first one that
+    /// answers 2xx, and reports what each candidate said.
+    ///
+    /// Justification for probing rather than assuming: the codebase records a
+    /// firm conclusion that no such endpoint exists, but that came from the
+    /// same investigation that also concluded `hangup` + `dequeue` was a
+    /// working teardown — which turned out to be false (that call site passes
+    /// a random peerid and had been failing with 500 all along). With
+    /// `terminating`, `hangup` and `dequeue` all now confirmed to leave the
+    /// machine bound, the "no endpoint" conclusion deserves an actual test.
+    ///
+    /// `session/start` is what claims a machine, so `session/stop` is the
+    /// obvious counterpart — note this file's own teardown stub was already
+    /// named `stopSession`. The body carries both identifiers because
+    /// `session/start` exists in two variants taking different ones, and
+    /// unknown extra fields are typically ignored; that keeps this to one
+    /// request per candidate.
+    ///
+    /// Deliberately bounded: this account has been rate-limited (429, with
+    /// escalating lockouts) by request volume before, so this runs only on an
+    /// explicit Disconnect, tries at most five paths, and stops early on
+    /// success.
+    func probeSessionStop(sessionId: String, appId: Int?, cookies: [String: String]) async -> String {
+        let candidates = [
+            "/v2/streaming/session/stop",
+            "/v2/streaming/session/terminate",
+            "/v1/streaming/session/stop",
+            "/v2/streaming/session/close",
+            "/v2/streaming/session/finish",
+        ]
+        var body: [String: Any] = ["sessionId": sessionId]
+        if let appId { body["appId"] = appId }
+        let payload = try? JSONSerialization.data(withJSONObject: body)
+
+        var notes: [String] = []
+        for path in candidates {
+            guard let url = URL(string: apiBase + path) else { continue }
+            var req = authenticatedRequest(url, cookies: cookies, method: "POST")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = payload
+            guard let (_, response) = try? await session.data(for: req) else {
+                notes.append("\(path.split(separator: "/").last ?? "?"):x")
+                continue
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let name = path.replacingOccurrences(of: "/streaming/session", with: "")
+            notes.append("\(name):\(status)")
+            if (200...299).contains(status) {
+                notes.append("<- HIT")
+                break
+            }
+        }
+        return notes.joined(separator: " ")
+    }
+
     /// Asks the server, in its own words, whether a session is still alive.
     /// 200 + a gateway means the machine is genuinely still bound to it; 406
     /// is the "queued or gone" answer (see detailsIfReady). Used by the
