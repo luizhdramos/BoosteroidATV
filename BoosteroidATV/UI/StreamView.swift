@@ -97,6 +97,10 @@ struct StreamView: View {
     /// known (see start()) — nil until then, or if it can't be matched
     /// against the account's playgrounds list.
     @State private var connectedServerName: String?
+    /// True from the moment Disconnect is pressed until the session teardown
+    /// finishes — see the Disconnect button, which now waits for the server
+    /// to acknowledge the terminate.
+    @State private var isDisconnecting = false
 
     var body: some View {
         ZStack {
@@ -384,14 +388,23 @@ struct StreamView: View {
                     // the real end-session WebSocket message; it must complete
                     // (and the socket must still be open) BEFORE disconnect()
                     // tears the control channel down.
+                    //
+                    // terminateSession now deliberately waits for the server to
+                    // acknowledge by closing the socket, so this can take a
+                    // beat — hence the explicit "Ending session…" state rather
+                    // than leaving the button looking unresponsive.
+                    guard !isDisconnecting else { return }
+                    isDisconnecting = true
                     Task {
                         await controller.terminateSession()
                         controller.disconnect()
                         onDismiss()
                     }
                 } label: {
-                    Label("Disconnect", systemImage: "xmark.circle")
+                    Label(isDisconnecting ? "Ending session…" : "Disconnect",
+                          systemImage: "xmark.circle")
                 }
+                .disabled(isDisconnecting)
                 .buttonStyle(.bordered)
                 .tint(.gray)
 

@@ -166,6 +166,14 @@ actor BoosteroidControlChannel {
     private var statusBandwidthBps: Int = 0
     private(set) var isOpen = false
 
+    /// Set once the socket has actually finished — a server-initiated close,
+    /// a receive error, or an explicit local `disconnect()`. Lets
+    /// `StreamController.terminateSession` tear down as soon as the server
+    /// has genuinely acted on the terminate message, rather than always
+    /// burning a fixed grace period (or, as before, tearing the socket down
+    /// so fast the message never made it onto the wire).
+    private(set) var didClose = false
+
     /// CONFIRMED array literal from `SessionHandler.sendEvents` — these four
     /// types get `id_cmd`/`from_udp` auto-appended; everything else (e.g.
     /// "settings"/"stream" housekeeping messages, not used by this client)
@@ -213,6 +221,7 @@ actor BoosteroidControlChannel {
     ) -> AsyncStream<IncomingEvent> {
         statusFramerate = refreshRate
         statusBandwidthBps = maxBitrateBps
+        didClose = false
         let host = nodeBaseUrl
             .replacingOccurrences(of: "https://", with: "")
             .replacingOccurrences(of: "http://", with: "")
@@ -243,8 +252,19 @@ actor BoosteroidControlChannel {
 
     func disconnect() {
         isOpen = false
+        didClose = true
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
+    }
+
+    /// Waits until the socket closes, or `timeout` seconds elapse — whichever
+    /// comes first. Returns true if it actually closed.
+    func waitForClose(timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !didClose, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return didClose
     }
 
     /// Sends one input/control event. `type`/`action`/`fields` build the
@@ -290,6 +310,7 @@ actor BoosteroidControlChannel {
             }
         }
         isOpen = false
+        didClose = true
         continuation.yield(.closed)
         continuation.finish()
     }

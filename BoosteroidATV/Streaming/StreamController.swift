@@ -345,9 +345,28 @@ final class StreamController: NSObject {
     /// device's local connection while leaving the cloud session running
     /// (see the .onDisappear note in StreamView for why Back's natural
     /// dismiss-to-Home deliberately does NOT call this).
+    /// FIX 2026-08-06 (reported: Disconnect still leaves the session running).
+    /// The message shape above is right, but it was being raced off the wire.
+    /// `URLSessionWebSocketTask.send()` resolves once the frame is handed to
+    /// the transport — NOT once it's actually flushed and processed by the
+    /// server. `disconnect()` ran immediately after this returned, and it
+    /// cancels `controlChannelTask`, whose AsyncStream `onTermination` closure
+    /// cancels the underlying socket right then (`wsTask.cancel(.goingAway)`).
+    /// So the socket could be torn down before the terminate frames ever left
+    /// the device — a correct message that the server never received, which
+    /// matches the symptom exactly.
+    ///
+    /// Now it waits for the server to actually close the socket, which is the
+    /// real confirmation it acted on the terminate, and only falls back to a
+    /// bounded timeout if that never comes. Returns as soon as the close
+    /// lands, so a healthy teardown stays fast.
     func terminateSession() async {
         await controlChannel.send(type: "settings", action: "terminating")
         await controlChannel.send(type: "settings", action: "terminating")
+        let closed = await controlChannel.waitForClose(timeout: 2)
+        if !closed {
+            controlLog.append("terminate: server never closed the socket (2s)")
+        }
     }
 
     func disconnect() {
