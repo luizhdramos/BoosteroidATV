@@ -37,8 +37,16 @@ IPA="$BUILD_DIR/$APP_NAME-$VERSION.ipa"
 
 cd "$(dirname "$0")/.."
 
-if ! command -v xcodebuild >/dev/null 2>&1; then
-    echo "error: xcodebuild not found — this needs a Mac with Xcode installed." >&2
+# Actually run xcodebuild rather than just looking for it on PATH: the Command
+# Line Tools ship a shim of the same name that satisfies `command -v` but can't
+# build anything, so a PATH check reports success and the build then fails with
+# xcode-select's rather opaque "requires Xcode" error.
+if ! xcodebuild -version >/dev/null 2>&1; then
+    echo "error: xcodebuild isn't usable — this needs a Mac with the full Xcode." >&2
+    echo >&2
+    echo "If Xcode IS installed, the active developer directory is probably still" >&2
+    echo "pointing at the Command Line Tools. Point it at Xcode:" >&2
+    echo "  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2
     exit 1
 fi
 
