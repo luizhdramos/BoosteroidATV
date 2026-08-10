@@ -16,39 +16,18 @@ A native, open-source **tvOS** client for [Boosteroid](https://cloud.boosteroid.
 
 Boosteroid ships official apps for many platforms but not for Apple TV. BoosteroidATV fills that gap with a from-scratch native tvOS app that authenticates against your Boosteroid account, lists your library, and streams a running game session straight to your TV with full controller support — including working rumble.
 
-It is built in the same spirit as its sibling project **[CloudNow](https://github.com/owenselles/CloudNow)** (a native GeForce NOW client for Apple TV): SwiftUI UI, `AVSampleBufferDisplayLayer` video rendering, and [`livekit/webrtc-xcframework`](https://github.com/livekit/webrtc-xcframework) as the WebRTC transport.
+It is built in the same spirit as its sibling project **[CloudNow](https://github.com/owenselles/CloudNow)**, a native GeForce NOW client for Apple TV.
 
 ## Features
 
-- **Native tvOS experience** — a single-screen SwiftUI Home built for the Siri Remote and a couch, with Settings and Help pushed as full-screen destinations.
-- **Your Boosteroid library** — signs in with your account and lists the games in your library via Boosteroid's own catalog API.
-- **WebRTC game streaming** — low-latency H.264 video/audio over the same per-session WebRTC path the official web client uses.
-- **Full input support** — MFi / Xbox / PlayStation / Nintendo Switch game controllers, forwarded to the cloud PC over Boosteroid's control channel. Controller mapping (buttons, triggers, sticks, D-pad) is matched byte-for-byte to the official client.
-- **Controller rumble** — real vibration via CoreHaptics/GameController, confirmed working end to end on real hardware (Nintendo Switch Pro Controller). Toggle on/off and pick an intensity (Automatic, Weak, Medium, Strong, Very Strong) in Settings. Whether rumble actually works depends on the controller: some third-party "compatibility mode" pads (e.g. clones running in an emulated Xbox mode) don't implement the vibration side of that mode even though buttons work fine — that's a controller/firmware limitation, not something the app can fix.
+- **Native tvOS experience** — built for the Siri Remote and a couch, not a ported web page.
+- **Your Boosteroid library** — sign in with your account and your installed games are right there.
+- **Low-latency streaming** — H.264 video and audio over WebRTC, the same path the official web client uses.
+- **Full controller support** — MFi / Xbox / PlayStation / Nintendo Switch gamepads, with buttons, triggers, sticks and D-pad all mapped exactly as the official clients do.
+- **Controller rumble** — with an on/off toggle and an intensity setting (Automatic, Weak, Medium, Strong, Very Strong). Some third-party pads running in a compatibility or Xbox emulation mode don't implement vibration at all, even though their buttons work fine; that's a controller limitation the app can't work around.
 - **Server / region selection** — mirrors cloud.boosteroid.com's account settings: a toggle to allow connecting to distant regions, and a dropdown to pick a preferred server location (or Automatic). The server you actually connected to is shown while streaming.
 - **Quality settings** — resolution (720p / 1080p / 1440p / 4K), frame rate (60 / 120 fps), automatic or manual bitrate, and an analog-stick deadzone slider.
 - **Optional performance overlay** — a compact, opt-in HUD showing bitrate, stream FPS, network latency, and which server you're on.
-
-## How it works
-
-A Boosteroid game session moves through several stages, each backed by a real service endpoint:
-
-1. **Authentication** — a direct email/password login (`POST /api/v1/auth/login`), the same request Boosteroid's own Android TV app makes from its "Sign in Manually" screen. No browser, no Cloudflare Turnstile challenge (that only gates the public web login page, not this API route), nothing to copy or paste — see [Signing in](#signing-in). The response sets the same session cookies the rest of the REST API relies on; the app stores everything in the Keychain and refreshes it automatically.
-2. **Session lifecycle** — tapping a game enqueues a fresh session for it (or resumes it if that exact game is already live), waits in Boosteroid's queue if needed, and resolves the per-session gateway host once a machine is ready. Fully standalone — no other device involved.
-3. **Control channel** — a dedicated JSON WebSocket claims the session for this device, receives its streaming configuration, gates the WebRTC start, and carries all controller input (including rumble coming back from the game).
-4. **WebRTC media** — the client negotiates an SDP offer/answer with the session's node, trickles ICE candidates, then renders decoded frames through Metal-backed `AVSampleBufferDisplayLayer`.
-
-The codebase is organized into five functional areas:
-
-| Area | Key files | Responsibility |
-| --- | --- | --- |
-| **Auth** | `AuthManager`, `BoosteroidAuthAPI`, `AuthCore` | Email/password sign-in, token refresh, and Keychain storage |
-| **Session** | `BoosteroidClient`, `BoosteroidRealtimeClient`, `SessionState` | Catalog, session lifecycle, region/server preferences, and the live queue-position feed |
-| **Streaming** | `StreamController`, `BoosteroidControlChannel`, `SignalingClient`, `SDPMunger`, `InputSender` | Control channel, WebRTC signaling, SDP munging, controller input, and rumble |
-| **Video** | `VideoSurfaceView` | Decoded-frame rendering |
-| **UI** | `MainTabView`, `HomeView`, `SettingsView`, `HelpView`, `StreamView`, `LoginView` | SwiftUI screens |
-
-Protocol details that don't fit in code comments — the full session/queue/WebRTC handoff, confirmed vs. inferred behavior, and notes for anyone porting this to another platform — live in [`docs/switch-port-handoff.md`](docs/switch-port-handoff.md).
 
 ## Requirements
 
@@ -102,21 +81,21 @@ Type your email and password on the Apple TV — no browser, no second device. T
 
 ## Status & limitations
 
-This is an **experimental, independently-built** client. The core loop — sign in, list library, launch a game standalone (fresh queue or resume), stream video/audio, and send controller input (including rumble) — has been verified end-to-end against a real, paying account. Known constraints:
+This is an **experimental** client. Signing in, launching a game, streaming, and controller input (including rumble) all work; these are the rough edges to expect:
 
-- **H.264 only.** Boosteroid's WebRTC path only offers H.264. H.265/HEVC and AV1 are delivered exclusively over Boosteroid's native UDP transport, which this client does not implement. (Apple TV can decode HEVC, so this is a service-side limitation, not a device one.)
-- **Disconnecting doesn't free the machine right away.** The Disconnect button ends the session the same way Boosteroid's own clients do, but the machine is kept warm for a while afterwards — so reconnecting soon after resumes the running game instead of starting fresh. The official macOS client behaves identically; it's a service behavior, not an app limitation.
+- **H.264 only.** Boosteroid delivers H.265 and AV1 only over a transport this app doesn't implement, so streams are H.264. Apple TV can decode HEVC — this is a service-side limit, not a device one.
+- **Disconnecting doesn't free the machine right away.** Boosteroid keeps your machine warm for a while after a session ends, so reconnecting soon after resumes the running game instead of starting fresh. The official clients behave the same way.
 - **No catalog browsing yet.** Home shows your installed library as a grid; there's no search, store browsing, or "Continue Playing"/Favorites rows yet.
 
 ## Roadmap
 
 - Richer catalog browsing (store / search / carousels, Continue Playing / Favorites rows)
 - Community testing across more controller models, especially around rumble
-- H.265/AV1 video (Apple TV can decode both, but Boosteroid only offers them over its raw-UDP `clientType=native` transport, not the WebRTC path this app uses — the native protocol itself has never been captured/documented, so this would start from scratch with a traffic capture, not just a settings change)
+- H.265/AV1 video — a large piece of work, since it needs a transport this app doesn't currently implement
 
 ## Contributing
 
-Issues and pull requests are welcome — this is an independent client with no official docs behind it, so real-device testing (different controllers, regions, network conditions) is especially valuable. If you're touching the streaming/protocol layer, `docs/switch-port-handoff.md` and the `CONFIRMED` / `TODO(protocol)` / `UNCONFIRMED` comments throughout `BoosteroidATV/Streaming` and `BoosteroidATV/Session` explain what's been verified in practice versus what's still a best guess.
+Issues and pull requests are welcome. This is an independent client with no official documentation behind it, so real-device testing — different controllers, regions and network conditions — is especially valuable. If you're working on the streaming layer, the code comments mark what's been verified in practice versus what's still a best guess.
 
 ## Support
 
