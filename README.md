@@ -69,6 +69,19 @@ Protocol details that don't fit in code comments — the full session/queue/WebR
 3. Configure signing: select the **BoosteroidATV** target → **Signing & Capabilities** and pick your own team (Automatic signing). See `Local.xcconfig.example` for an xcconfig-based alternative.
 4. Select an Apple TV (or the tvOS Simulator) as the run destination and build & run (⌘R).
 
+### Building a .ipa
+
+To produce an installable package instead of running from Xcode:
+
+```sh
+./scripts/build-ipa.sh              # unsigned — for sideloading tools
+DEVELOPMENT_TEAM=ABCDE12345 ./scripts/build-ipa.sh --signed
+```
+
+The result lands in `build/BoosteroidATV.ipa`. Unsigned is the default because sideloading tools re-sign the app with the end user's own Apple ID anyway, so a signature added here would just be discarded.
+
+Note that with a free Apple ID a sideloaded app stops working after 7 days and has to be reinstalled; a paid Apple Developer Program membership extends that to a year.
+
 ## Signing in
 
 Type your email and password on the Apple TV — no browser, no second device. That's the first screen the app shows.
