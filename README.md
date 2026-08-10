@@ -78,7 +78,13 @@ To produce an installable package instead of running from Xcode:
 DEVELOPMENT_TEAM=ABCDE12345 ./scripts/build-ipa.sh --signed
 ```
 
-The result lands in `build/BoosteroidATV.ipa`. Unsigned is the default because sideloading tools re-sign the app with the end user's own Apple ID anyway, so a signature added here would just be discarded.
+The result lands in `build/BoosteroidATV-<version>.ipa`. Unsigned is the default because sideloading tools re-sign the app with the end user's own Apple ID anyway, so a signature added here would just be discarded.
+
+Releases are dated rather than numbered (`YYYY.MM.DD`), and the build stamps that date as the app's version so it always matches the tag it ships under. Pass `VERSION=` to override — for a second release on the same day, or to rebuild an older tag:
+
+```sh
+VERSION=2026.08.10.1 ./scripts/build-ipa.sh
+```
 
 Note that with a free Apple ID a sideloaded app stops working after 7 days and has to be reinstalled; a paid Apple Developer Program membership extends that to a year.
 
