@@ -115,20 +115,23 @@ actor BoosteroidAuthAPI {
             // shows up next (expired account, wrong region, etc.).
             let bodyText = String(data: data, encoding: .utf8) ?? "<non-UTF8 body, \(data.count) bytes>"
 
-            // Boosteroid's own sign-in page offers Google as well as
-            // email/password (see AuthCore.loginStartUrl), and an account
-            // created through Google has no password at all — so this route
-            // can never authenticate it. That comes back as an ordinary
-            // "credentials not found", which reads as a typo and sends people
-            // round in circles retrying a password that doesn't exist.
-            // Reported by users who couldn't sign in at all. The raw body is
-            // still appended, since it's what distinguishes this from a
-            // genuinely wrong password.
+            // The server answers "credentials not found" for several quite
+            // different situations, and on its own that reads as a typo — so
+            // people retry the same thing instead of checking the two causes
+            // that actually turn up. Both are from real reports: someone
+            // signing in with a different email than the one their Boosteroid
+            // account uses, and accounts created through the "Continue with
+            // Google" option on Boosteroid's own sign-in page (see
+            // AuthCore.loginStartUrl), which have no password at all and so
+            // can never authenticate through this route. The raw body is
+            // still appended — it's what tells this apart from a genuinely
+            // wrong password.
             if bodyText.contains("142299") || bodyText.lowercased().contains("could not find those credentials") {
                 throw AuthError.loginFailed(
-                    "Boosteroid didn't accept that email and password. "
-                    + "If you signed up with \"Continue with Google\", your account has no password — "
-                    + "set one on cloud.boosteroid.com first, then sign in here.\n\n(\(bodyText))")
+                    "Boosteroid didn't accept that email and password. Two things to check:\n\n"
+                    + "• Use the same email you sign in with on cloud.boosteroid.com — not another address you own.\n"
+                    + "• If you signed up with \"Continue with Google\", your account has no password. "
+                    + "Set one on cloud.boosteroid.com first, then sign in here with it.\n\n(\(bodyText))")
             }
             throw AuthError.loginFailed("HTTP \(http.statusCode): \(bodyText)")
         }

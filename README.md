@@ -76,7 +76,7 @@ The result lands in `build/BoosteroidATV-<version>.ipa`. Unsigned is the default
 
 Type your email and password on the Apple TV — no browser, no second device. That's the first screen the app shows.
 
-If you created your Boosteroid account with "Continue with Google", it has no password and this won't work. Set one on cloud.boosteroid.com first, then sign in here with it.
+Use the same email you sign in with on cloud.boosteroid.com. If you created the account with "Continue with Google" it has no password at all — set one on the website first, then sign in here with it.
 
 ## Usage
 
