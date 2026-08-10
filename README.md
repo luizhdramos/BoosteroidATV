@@ -31,12 +31,25 @@ It is built in the same spirit as its sibling project **[CloudNow](https://githu
 
 ## Requirements
 
-- **Xcode 16 or newer**
-- **tvOS 17+** target (an Apple TV device or the tvOS Simulator)
-- [`livekit/webrtc-xcframework`](https://github.com/livekit/webrtc-xcframework) via Swift Package Manager — already referenced in the project; Xcode resolves it on first open
+- An Apple TV running **tvOS 17 or newer**
 - An active, paid **Boosteroid** account
+- A game controller (optional, but the Siri Remote alone isn't much fun)
+
+## Installing
+
+Grab the `.ipa` from the [latest release](../../releases/latest) and install it with a sideloading tool such as [Sideloadly](https://sideloadly.io), signing in with your own Apple ID.
+
+A few things worth knowing before you start:
+
+- The `.ipa` is unsigned on purpose — the sideloading tool signs it with your Apple ID as it installs.
+- On an Apple TV without a USB port, sideloading works from **macOS only**. On the Apple TV, open **Settings → Remotes and Devices → Remote App and Devices** and leave that screen open so your Mac can find it.
+- With a free Apple ID the app stops working after 7 days and has to be reinstalled. A paid Apple Developer Program membership extends that to a year.
+
+Prefer to build it yourself? See [Building](#building).
 
 ## Building
+
+Needs **Xcode 16 or newer**. The WebRTC dependency is already referenced in the project and Xcode resolves it on first open.
 
 1. Clone the repository and open `BoosteroidATV.xcodeproj` in Xcode:
    ```sh
@@ -57,15 +70,7 @@ To produce an installable package instead of running from Xcode:
 DEVELOPMENT_TEAM=ABCDE12345 ./scripts/build-ipa.sh --signed
 ```
 
-The result lands in `build/BoosteroidATV-<version>.ipa`. Unsigned is the default because sideloading tools re-sign the app with the end user's own Apple ID anyway, so a signature added here would just be discarded.
-
-Releases are dated rather than numbered (`YYYY.MM.DD`), and the build stamps that date as the app's version so it always matches the tag it ships under. Pass `VERSION=` to override — for a second release on the same day, or to rebuild an older tag:
-
-```sh
-VERSION=2026.08.10.1 ./scripts/build-ipa.sh
-```
-
-Note that with a free Apple ID a sideloaded app stops working after 7 days and has to be reinstalled; a paid Apple Developer Program membership extends that to a year.
+The result lands in `build/BoosteroidATV-<version>.ipa`. Unsigned is the default, since sideloading tools sign the app with the end user's own Apple ID anyway.
 
 ## Signing in
 
