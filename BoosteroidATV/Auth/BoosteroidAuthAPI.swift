@@ -114,6 +114,22 @@ actor BoosteroidAuthAPI {
             // full body is still more useful than a trimmed one for whatever
             // shows up next (expired account, wrong region, etc.).
             let bodyText = String(data: data, encoding: .utf8) ?? "<non-UTF8 body, \(data.count) bytes>"
+
+            // Boosteroid's own sign-in page offers Google as well as
+            // email/password (see AuthCore.loginStartUrl), and an account
+            // created through Google has no password at all — so this route
+            // can never authenticate it. That comes back as an ordinary
+            // "credentials not found", which reads as a typo and sends people
+            // round in circles retrying a password that doesn't exist.
+            // Reported by users who couldn't sign in at all. The raw body is
+            // still appended, since it's what distinguishes this from a
+            // genuinely wrong password.
+            if bodyText.contains("142299") || bodyText.lowercased().contains("could not find those credentials") {
+                throw AuthError.loginFailed(
+                    "Boosteroid didn't accept that email and password. "
+                    + "If you signed up with \"Continue with Google\", your account has no password — "
+                    + "set one on cloud.boosteroid.com first, then sign in here.\n\n(\(bodyText))")
+            }
             throw AuthError.loginFailed("HTTP \(http.statusCode): \(bodyText)")
         }
         guard let dto = try? JSONDecoder().decode(BoosteroidLoginResponseDTO.self, from: data) else {

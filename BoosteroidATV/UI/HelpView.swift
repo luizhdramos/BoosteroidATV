@@ -85,6 +85,7 @@ struct HelpView: View {
                 ]
             case .troubleshooting:
                 return [
+                    "• Can't sign in — if you created your Boosteroid account with \"Continue with Google\", it has no password, so email and password sign-in can't work. Set a password on cloud.boosteroid.com first, then sign in here with it.",
                     "• Controller not responding — make sure the pad is paired in tvOS Settings → Remotes and Devices, not just powered on. If it still doesn't respond, disconnect and start the game again.",
                     "• Rumble not working — check that rumble is enabled in Settings. Some third-party pads running in a compatibility or Xbox emulation mode don't implement vibration at all, even though their buttons work fine.",
                     "• Bitrate drops while playing — the server lowers quality when it detects packet loss or rising latency. Turn on the performance overlay: if latency climbs as the bitrate falls, it's a network condition rather than the app.",

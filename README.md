@@ -76,6 +76,8 @@ The result lands in `build/BoosteroidATV-<version>.ipa`. Unsigned is the default
 
 Type your email and password on the Apple TV — no browser, no second device. That's the first screen the app shows.
 
+If you created your Boosteroid account with "Continue with Google", it has no password and this won't work. Set one on cloud.boosteroid.com first, then sign in here with it.
+
 ## Usage
 
 **Launching a game.** Fully standalone — just select a game on your Apple TV. That enqueues a fresh session for it (waiting in Boosteroid's queue if needed), or resumes it directly if that exact game is already live on the account. No other device is needed to start or hand off a session.
