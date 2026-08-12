@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - Boosteroid Auth API
@@ -61,21 +62,17 @@ actor BoosteroidAuthAPI {
         // real Apple TV device info once it's confirmed these fields aren't
         // validated/pinned to a specific value.
         //
-        // `x-nonce-17`: adding the OTHER headers above got past "something
-        // wrong with your data" but then hit a real, specific 422 "we could
-        // not find those credentials" (error_code 142299) with genuinely
-        // correct credentials (confirmed working seconds later on the real
-        // Android app with the exact same email/password). CONFIRMED
-        // 2026-07-28 by capturing a SECOND, separate real login — made
-        // significantly later than the first capture — that this header's
-        // value is "18211" BOTH times. A real per-request nonce or signature
-        // would differ between two logins made minutes apart; an identical
-        // value both times means it's a fixed constant baked into this app
-        // build (v.2.5.10.tv), not something computed per-call, and
-        // apparently required (likely a WAF/gateway fingerprint check) even
-        // though the request body/other headers alone weren't enough.
-        request.setValue("18211", forHTTPHeaderField: "x-nonce-17")
-        request.setValue("BoosteroidAndroidTVClient v.2.5.10.tv; Android 14; sdk_gphone64_arm64", forHTTPHeaderField: "User-Agent")
+        // Reverse-verified against the official Android TV v.2.5.11 app.
+        // This is a 17-bit SHA-512 proof-of-work over lowercased email +
+        // password, not a fixed client/version constant. The credentials and
+        // intermediate digest stay in memory and are never logged.
+        let nonce = Self.makeNonce(email: email, password: password)
+        request.setValue(String(nonce), forHTTPHeaderField: "x-nonce-17")
+        // Google Play currently serves v.2.5.11.tv (released 2026-07-29).
+        // Boosteroid rejects retired native-client versions with the same
+        // generic 142299 response it uses for bad credentials, so keep this
+        // fingerprint aligned with the currently supported TV release.
+        request.setValue("BoosteroidAndroidTVClient v.2.5.11.tv; Android 14; sdk_gphone64_arm64", forHTTPHeaderField: "User-Agent")
         request.setValue("emu64a sdk_gphone64_arm64 34", forHTTPHeaderField: "device-name")
         request.setValue("", forHTTPHeaderField: "device-uniq-id")
         request.setValue("en-US", forHTTPHeaderField: "accept-language")
@@ -161,6 +158,31 @@ actor BoosteroidAuthAPI {
             expiresAt: Self.parseExpiresIn(dto.data.expiresIn) ?? Date().addingTimeInterval(12 * 60 * 60)
         )
         return AuthSession(tokens: tokens, user: user)
+    }
+
+    /// Matches the official Android TV client's `X-Nonce-17` calculation:
+    /// SHA-512(bigEndianCounter || UTF8(lowercaseEmail + password)) must have
+    /// its first 17 bits clear. The first matching counter is sent as decimal.
+    private static func makeNonce(email: String, password: String) -> UInt32 {
+        let credentialBytes = Data((email.lowercased() + password).utf8)
+
+        for counter in UInt32.zero...UInt32(Int32.max) {
+            var bigEndianCounter = counter.bigEndian
+            var candidate = Data(bytes: &bigEndianCounter, count: MemoryLayout<UInt32>.size)
+            candidate.append(credentialBytes)
+
+            let digest = Array(SHA512.hash(data: candidate))
+            if digest[0] == 0,
+               digest[1] == 0,
+               digest[2] & 0x80 == 0
+            {
+                return counter
+            }
+        }
+
+        // The official client uses -1 if no solution is found. The search
+        // space makes that practically unreachable; preserve the bit pattern.
+        return UInt32.max
     }
 
     /// `expires_in` is misleadingly named — CONFIRMED (live capture) it's an

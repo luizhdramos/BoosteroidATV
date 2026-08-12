@@ -1,71 +1,55 @@
 import SwiftUI
+import GameController
 
 struct MainTabView: View {
-    @Environment(AuthManager.self) var authManager
+    @Environment(AuthManager.self) private var authManager
     @State private var viewModel = GamesViewModel()
     @State private var gameToPlay: GameInfo?
-    @State private var path = NavigationPath()
-    /// Drives the launch confirmation alert.
-    @State private var launchAlert: LaunchAlert?
+    @State private var selectedGame: GameInfo?
+    @State private var pendingGameToPlay: GameInfo?
+    @State private var selectedTab: AppTab = .home
 
-    private enum LaunchAlert: Identifiable {
-        case confirm(GameInfo)
-
-        var id: String {
-            switch self {
-            case .confirm(let game): return "confirm-\(game.id)"
-            }
-        }
-    }
-
-    /// Settings and Help are pushed screens, not tabs — there's no "Home"
-    /// destination because Home is the implicit root of the stack. tvOS pops
-    /// a pushed NavigationStack destination automatically when the Menu/"TV"
-    /// remote button is pressed, which is exactly the "press TV to go back to
-    /// Home" behavior requested — no extra handling needed.
-    private enum Destination: Hashable {
-        case settings
-        case help
+    private enum AppTab: Hashable {
+        case home, library, settings, help
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                header
-                    .padding(.top, 24)
-                    .padding(.bottom, 12)
-                    .padding(.horizontal, 60)
-                    // focusSection makes the bar a first-class focus target, so
-                    // pressing up from anywhere in the content below reliably
-                    // returns focus here.
-                    .focusSection()
+        TabView(selection: $selectedTab) {
+            Tab("Home", systemImage: "house.fill", value: AppTab.home) {
+                HomeView(
+                    featuredGame: viewModel.lastPlayedGame ?? viewModel.library.first,
+                    favoriteGames: viewModel.favoriteGames,
+                    isLoading: viewModel.isLoading,
+                    error: viewModel.error,
+                    onPlay: launch,
+                    onShowDetails: { selectedGame = $0 },
+                    onRefresh: { await viewModel.refreshLibrary(authManager: authManager) }
+                )
+            }
 
-                HomeView(games: viewModel.library, onPlay: { launchAlert = .confirm($0) })
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // Soft fade at the top (and a touch at the bottom) so content
-                    // dissolves as it scrolls past the fixed bar instead of being
-                    // cut off by a hard edge.
-                    .mask(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0),
-                                .init(color: .black, location: 0.06),
-                                .init(color: .black, location: 0.94),
-                                .init(color: .clear, location: 1),
-                            ],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
+            Tab("Library", systemImage: "books.vertical.fill", value: AppTab.library) {
+                LibraryView(
+                    games: viewModel.library,
+                    isLoading: viewModel.isLoading,
+                    onPlay: launch
+                )
             }
-            .background(BoosteroidTheme.background.ignoresSafeArea())
-            .navigationDestination(for: Destination.self) { destination in
-                switch destination {
-                case .settings:
-                    SettingsView()
-                case .help:
-                    HelpView()
-                }
+
+            Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) {
+                SettingsView()
             }
+
+            Tab("Help", systemImage: "questionmark.circle.fill", value: AppTab.help) {
+                HelpView()
+            }
+        }
+        .tint(BoosteroidTheme.violet)
+        .background {
+            ControllerTabSwitcher(
+                isEnabled: gameToPlay == nil && selectedGame == nil,
+                onPrevious: { moveTab(by: -1) },
+                onNext: { moveTab(by: 1) }
+            )
         }
         .environment(viewModel)
         .task { await viewModel.load(authManager: authManager) }
@@ -75,66 +59,115 @@ struct MainTabView: View {
                 .environment(authManager)
                 .environment(viewModel)
         }
-        .alert(
-            alertTitle,
-            isPresented: Binding(get: { launchAlert != nil }, set: { if !$0 { launchAlert = nil } }),
-            presenting: launchAlert
-        ) { alert in
-            switch alert {
-            case .confirm(let game):
-                Button("Start") {
-                    launchAlert = nil
-                    gameToPlay = game
-                }
-                Button("Cancel", role: .cancel) { launchAlert = nil }
-            }
-        } message: { alert in
-            switch alert {
-            case .confirm:
-                // createSession resumes a session that's genuinely still running
-                // (proven by session/details returning a gateway) and otherwise
-                // queues a new one.
-                Text("If this game is still running, you'll pick up where you left off — including a session open on another device, which will move here. Otherwise a new session starts and you may wait in a queue.")
-            }
+        .fullScreenCover(item: $selectedGame, onDismiss: {
+            guard let game = pendingGameToPlay else { return }
+            pendingGameToPlay = nil
+            launch(game)
+        }) { game in
+            GameOverviewView(
+                game: game,
+                isFavorite: viewModel.isFavorite(game),
+                onPlay: {
+                    pendingGameToPlay = game
+                    selectedGame = nil
+                },
+                onToggleFavorite: { viewModel.toggleFavorite(game) },
+                onDismiss: { selectedGame = nil }
+            )
         }
     }
 
-    /// "BoosteroidTV" wordmark (with a lightning-bolt logo) top-left, and
-    /// Settings/Help pill buttons top-right. No "Home" entry — Home is this
-    /// screen itself.
-    private var header: some View {
-        HStack {
-            HStack(spacing: 10) {
-                Image(systemName: "bolt.fill")
-                    .foregroundStyle(BoosteroidTheme.brandGradient)
-                Text("BoosteroidTV")
-                    .foregroundStyle(.white)
-            }
-            .font(.title2.weight(.bold))
-
-            Spacer()
-
-            HStack(spacing: 24) {
-                navPill("Settings", systemImage: "gearshape.fill") { path.append(Destination.settings) }
-                navPill("Help", systemImage: "questionmark.circle.fill") { path.append(Destination.help) }
-            }
-        }
+    private func launch(_ game: GameInfo) {
+        viewModel.markPlayed(game)
+        gameToPlay = game
     }
 
-    @ViewBuilder
-    private func navPill(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .padding(.horizontal, 8)
-        }
-        .buttonStyle(.bordered)
-        .tint(.gray)
+    private func moveTab(by offset: Int) {
+        let tabs: [AppTab] = [.home, .library, .settings, .help]
+        guard let current = tabs.firstIndex(of: selectedTab) else { return }
+        let destination = current + offset
+        guard tabs.indices.contains(destination) else { return }
+        selectedTab = tabs[destination]
+    }
+}
+
+/// Adds GeForce NOW-style bumper navigation without changing the normal tvOS
+/// focus engine. It remains installed as controllers connect and ignores input
+/// while an overview or streaming screen is presented.
+private struct ControllerTabSwitcher: UIViewControllerRepresentable {
+    let isEnabled: Bool
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isEnabled: isEnabled, onPrevious: onPrevious, onNext: onNext)
     }
 
-    private var alertTitle: String {
-        switch launchAlert {
-        case .confirm(let game): return "Start \(game.title)?"
-        case nil: return ""
+    func makeUIViewController(context: Context) -> UIViewController {
+        context.coordinator.start()
+        let controller = UIViewController()
+        controller.view.isUserInteractionEnabled = false
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        context.coordinator.isEnabled = isEnabled
+        context.coordinator.onPrevious = onPrevious
+        context.coordinator.onNext = onNext
+        context.coordinator.installHandlers()
+    }
+
+    static func dismantleUIViewController(_ uiViewController: UIViewController, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    final class Coordinator {
+        var isEnabled: Bool
+        var onPrevious: () -> Void
+        var onNext: () -> Void
+        private var connectObserver: NSObjectProtocol?
+
+        init(isEnabled: Bool, onPrevious: @escaping () -> Void, onNext: @escaping () -> Void) {
+            self.isEnabled = isEnabled
+            self.onPrevious = onPrevious
+            self.onNext = onNext
+        }
+
+        func start() {
+            connectObserver = NotificationCenter.default.addObserver(
+                forName: .GCControllerDidConnect,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let controller = notification.object as? GCController else { return }
+                self?.installHandlers(on: controller)
+            }
+            installHandlers()
+        }
+
+        func installHandlers() {
+            GCController.controllers().forEach(installHandlers)
+        }
+
+        private func installHandlers(on controller: GCController) {
+            guard let gamepad = controller.extendedGamepad else { return }
+            gamepad.leftShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
+                guard pressed, let self, self.isEnabled else { return }
+                self.onPrevious()
+            }
+            gamepad.rightShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
+                guard pressed, let self, self.isEnabled else { return }
+                self.onNext()
+            }
+        }
+
+        func stop() {
+            if let connectObserver { NotificationCenter.default.removeObserver(connectObserver) }
+            connectObserver = nil
+            for controller in GCController.controllers() {
+                controller.extendedGamepad?.leftShoulder.pressedChangedHandler = nil
+                controller.extendedGamepad?.rightShoulder.pressedChangedHandler = nil
+            }
         }
     }
 }

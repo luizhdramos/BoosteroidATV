@@ -7,6 +7,9 @@ extension Notification.Name {
     /// together on a gamepad — see InputSender.pollGamepad for why a combo is
     /// needed at all. StreamView listens for this to open the options bar.
     static let gamepadPauseComboPressed = Notification.Name("BoosteroidATV.gamepadPauseComboPressed")
+    /// A real gamepad button was pressed. StreamView uses this to leave its
+    /// local Pointer mode while InputSender hides the Windows cursor.
+    static let gamepadInputBegan = Notification.Name("BoosteroidATV.gamepadInputBegan")
 }
 
 // MARK: - Input Event Handler
@@ -19,6 +22,7 @@ protocol InputEventHandler: AnyObject {
     /// Absolute pointer position, in the streamed surface's pixels.
     func sendMouseAbsolute(x: Int, y: Int)
     func sendMouseButton(down: Bool, button: UInt8)
+    func setMouseMode(enabled: Bool, x: Int, y: Int)
 }
 
 // MARK: - Input Sender
@@ -146,7 +150,6 @@ final class InputSender: InputEventHandler {
     /// from lastButtonState because the combo is handled locally and must not
     /// interfere with the individual button events still sent to the game.
     private var lastPauseComboState: [ObjectIdentifier: Bool] = [:]
-
     /// Same threshold the real web client uses (`GamepadController.
     /// AXIS_THRESHOLD`) before re-sending an axis value, out of a ±32767
     /// range — avoids flooding the socket with sub-pixel stick jitter.
@@ -169,11 +172,10 @@ final class InputSender: InputEventHandler {
     }
 
     func start() {
-        // CONFIRMED handshake: the web client sends this once before any
-        // mouse button/move events.
-        Task { [controlChannel] in await controlChannel.send(type: "mouse", action: "connected", fields: [
-            "LeftBtnState": false, "MiddleBtnState": false, "RightBtnState": false,
-        ]) }
+        // Do not announce a mouse during normal controller play. Some games,
+        // including Halo, react to the virtual mouse by displaying a Windows
+        // cursor indefinitely even though Pointer mode was never requested.
+        // The handshake is sent lazily by setMouseMode when Pointer is enabled.
 
         // queue: .main means these fire on the main thread, so hop to the main
         // actor synchronously (assumeIsolated) instead of spawning a Task that
@@ -296,6 +298,31 @@ final class InputSender: InputEventHandler {
     }
 
     // MARK: - Mouse
+
+    func setMouseMode(enabled: Bool, x: Int, y: Int) {
+        let fx = surfaceWidth > 0 ? min(max(Double(x) / Double(surfaceWidth), 0), 1) : 0
+        let fy = surfaceHeight > 0 ? min(max(Double(y) / Double(surfaceHeight), 0), 1) : 0
+        Task { [controlChannel] in
+            if enabled {
+                // Keep the handshake and first visible move ordered so games
+                // never see a half-connected mouse at an old position.
+                await controlChannel.send(type: "mouse", action: "connected", fields: [
+                    "LeftBtnState": false, "MiddleBtnState": false, "RightBtnState": false,
+                ])
+            }
+            await controlChannel.send(type: "mouse", action: "move", fields: [
+                "X": enabled ? fx : 1.0,
+                "Y": enabled ? fy : 1.0,
+                "offsetX": 0, "offsetY": 0,
+                "isVisible": enabled,
+            ])
+        }
+    }
+
+    private func hideMouseForControllerInput() {
+        setMouseMode(enabled: false, x: surfaceWidth, y: surfaceHeight)
+        NotificationCenter.default.post(name: .gamepadInputBegan, object: nil)
+    }
 
     func sendMouseMove(dx: Int16, dy: Int16) {
         // CONFIRMED relative-move shape (see BoosteroidControlChannel) — the
@@ -472,6 +499,7 @@ final class InputSender: InputEventHandler {
             if buttonState[index] != isPressed {
                 buttonState[index] = isPressed
                 controllerEventsSent += 1
+                if isPressed { hideMouseForControllerInput() }
                 Task { [controlChannel] in await controlChannel.send(type: "controller", action: "button", fields: [
                     "id": id, "button": index, "value": isPressed ? 1 : 0,
                 ]) }
@@ -550,6 +578,9 @@ final class InputSender: InputEventHandler {
         if lastHat[key] != hat {
             lastHat[key] = hat
             controllerEventsSent += 1
+            if hat != 0 {
+                hideMouseForControllerInput()
+            }
             // Sent on every change INCLUDING back to 0, so releases register.
             Task { [controlChannel] in await controlChannel.send(type: "controller", action: "pad", fields: [
                 "id": id, "hat": hat,

@@ -92,7 +92,25 @@ actor BoosteroidClient {
             throw BoosteroidClientError.requestFailed("fetchLibrary", String(data: data, encoding: .utf8) ?? "")
         }
         let page = try JSONDecoder().decode(BoosteroidPaginatedApplications.self, from: data)
-        return page.data.map(GameInfo.init)
+        let basicGames = page.data.map(GameInfo.init)
+
+        // The installed list is optimized for browsing and can omit longer
+        // description/rating fields. Enrich each entry from Boosteroid's
+        // application-detail endpoint, but keep the basic record if a detail
+        // request is unavailable so one game can never break the Library.
+        return await withTaskGroup(of: (Int, GameInfo).self) { group in
+            var result = basicGames
+            for (index, game) in basicGames.enumerated() {
+                group.addTask {
+                    guard let detail = try? await self.fetchApplication(id: game.id, cookies: cookies) else {
+                        return (index, game)
+                    }
+                    return (index, game.enriched(with: detail))
+                }
+            }
+            for await (index, game) in group { result[index] = game }
+            return result
+        }
     }
 
     func fetchApplication(id: String, cookies: [String: String]) async throws -> GameInfo {

@@ -28,7 +28,7 @@ struct SettingsView: View {
                               selection: $viewModel.streamSettings.fps)
                 }
                 section("Bitrate") {
-                    Toggle("Automatic bitrate", isOn: $viewModel.streamSettings.automaticBitrate)
+                    SettingsToggle("Automatic bitrate", isOn: $viewModel.streamSettings.automaticBitrate)
                     if !viewModel.streamSettings.automaticBitrate {
                         StepperRow(
                             title: "Max bitrate",
@@ -45,7 +45,7 @@ struct SettingsView: View {
                         onDecrease: { viewModel.streamSettings.controllerDeadzone = max(0, viewModel.streamSettings.controllerDeadzone - 0.05) },
                         onIncrease: { viewModel.streamSettings.controllerDeadzone = min(0.5, viewModel.streamSettings.controllerDeadzone + 0.05) }
                     )
-                    Toggle("Controller rumble", isOn: $viewModel.streamSettings.rumbleEnabled)
+                    SettingsToggle("Controller rumble", isOn: $viewModel.streamSettings.rumbleEnabled)
                     if viewModel.streamSettings.rumbleEnabled {
                         HStack(spacing: 16) {
                             Text("Rumble intensity")
@@ -78,10 +78,10 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 section("Overlay") {
-                    Toggle("Performance overlay", isOn: $viewModel.streamSettings.showStatsOverlay)
+                    SettingsToggle("Performance overlay", isOn: $viewModel.streamSettings.showStatsOverlay)
                 }
                 section("Region") {
-                    Toggle("Allow connection to distant regions", isOn: allowDistantRegionsBinding)
+                    SettingsToggle("Allow connection to distant regions", isOn: allowDistantRegionsBinding)
                     Text("When searching for available virtual machines, gain access to more VMs, but may experience disruptions or increased latency.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -146,6 +146,10 @@ struct SettingsView: View {
             .padding(.horizontal, 60)
             .padding(.vertical, 24)
         }
+        // Settings controls use Boosteroid's brand color. Interactive focus
+        // remains white/black for contrast instead of inheriting the app's
+        // green launch accent.
+        .tint(BoosteroidTheme.violet)
     }
 
     /// Mirrors cloud.boosteroid.com/profile/account/main's "Permitir ligação
@@ -210,19 +214,13 @@ private struct StepperRow: View {
         HStack(spacing: 16) {
             Text(title)
             Spacer()
-            Button(action: onDecrease) {
-                Image(systemName: "minus")
-            }
-            .buttonStyle(.bordered)
+            SettingsIconButton(systemName: "minus", action: onDecrease)
             Text(value)
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.82))
                 .frame(minWidth: 130)
                 .multilineTextAlignment(.center)
-            Button(action: onIncrease) {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.bordered)
+            SettingsIconButton(systemName: "plus", action: onIncrease)
         }
     }
 }
@@ -240,10 +238,112 @@ private struct OptionRow<Value: Hashable>: View {
             Text(title)
             Spacer()
             ForEach(options, id: \.1) { label, value in
-                Button(label) { selection = value }
-                    .buttonStyle(.bordered)
-                    .tint(selection == value ? .white : .gray)
+                SettingsOptionButton(
+                    label: label,
+                    isSelected: selection == value,
+                    action: { selection = value }
+                )
             }
         }
+    }
+}
+
+/// A focus-aware settings toggle. The standard tvOS Toggle changes its bar
+/// to white on focus without reliably changing its label/value color, making
+/// both disappear. Drawing the row explicitly keeps focused text black.
+private struct SettingsToggle: View {
+    let title: String
+    @Binding var isOn: Bool
+    @FocusState private var isFocused: Bool
+
+    init(_ title: String, isOn: Binding<Bool>) {
+        self.title = title
+        self._isOn = isOn
+    }
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(isOn ? "On" : "Off")
+            }
+            .font(.body)
+            .foregroundStyle(isFocused ? .black : .white)
+            .padding(.horizontal, 28)
+            .frame(minHeight: 66)
+            .background(
+                isFocused ? Color.white : BoosteroidTheme.violet,
+                in: Capsule()
+            )
+        }
+        .buttonStyle(SettingsPassthroughButtonStyle())
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .animation(.easeOut(duration: 0.12), value: isFocused)
+    }
+}
+
+/// Explicit focus colors avoid tvOS applying a white focus fill while leaving
+/// a white label, which made selected values such as 1080p/60 disappear.
+private struct SettingsOptionButton: View {
+    let label: String
+    let isSelected: Bool
+    let action: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(isFocused ? .black : .white)
+                .padding(.horizontal, 18)
+                .frame(minHeight: 54)
+                .background(
+                    isFocused ? Color.white
+                        : isSelected ? BoosteroidTheme.violet
+                        : Color.white.opacity(0.16),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(SettingsPassthroughButtonStyle())
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .animation(.easeOut(duration: 0.12), value: isFocused)
+    }
+}
+
+/// The minus/plus symbols get their own foreground color instead of
+/// inheriting the tint, so they stay visible in every focus state.
+private struct SettingsIconButton: View {
+    let systemName: String
+    let action: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.body.weight(.bold))
+                .foregroundStyle(isFocused ? .black : .white)
+                .frame(width: 74, height: 58)
+                .background(
+                    isFocused ? Color.white : BoosteroidTheme.violet,
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(SettingsPassthroughButtonStyle())
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .animation(.easeOut(duration: 0.12), value: isFocused)
+    }
+}
+
+/// tvOS's built-in button styles add a second, oversized white focus capsule.
+/// This style preserves Button activation/focus behavior while rendering only
+/// the compact focus background supplied by the control itself.
+private struct SettingsPassthroughButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.78 : 1)
     }
 }

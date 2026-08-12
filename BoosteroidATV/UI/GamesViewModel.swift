@@ -9,6 +9,17 @@ class GamesViewModel {
     var error: String?
 
     var streamSettings: StreamSettings = StreamSettings()
+    private(set) var favoriteIDs: Set<String> = []
+    private(set) var lastPlayedGameID: String?
+
+    var favoriteGames: [GameInfo] {
+        library.filter { favoriteIDs.contains($0.id) }
+    }
+
+    var lastPlayedGame: GameInfo? {
+        guard let lastPlayedGameID else { return nil }
+        return library.first { $0.id == lastPlayedGameID }
+    }
 
     // MARK: - Streaming Region Preference
     //
@@ -29,6 +40,8 @@ class GamesViewModel {
            let settings = try? JSONDecoder().decode(StreamSettings.self, from: data) {
             self.streamSettings = settings
         }
+        favoriteIDs = Set(UserDefaults.standard.stringArray(forKey: "boosteroid.favoriteGameIDs") ?? [])
+        lastPlayedGameID = UserDefaults.standard.string(forKey: "boosteroid.lastPlayedGameID")
     }
 
     func load(authManager: AuthManager) async {
@@ -50,6 +63,24 @@ class GamesViewModel {
             self.error = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Reloads the installed-game library without reloading account settings.
+    /// Used by the Home screen's Refresh command after games are added or
+    /// removed on another Boosteroid device.
+    func refreshLibrary(authManager: AuthManager) async {
+        guard !isLoading else { return }
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+
+        do {
+            let cookies = try await authManager.resolveCookies()
+            library = try await client.fetchLibrary(cookies: cookies)
+            activeSessions = (try? await client.getActiveSessions(cookies: cookies)) ?? activeSessions
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     /// Writes "Permitir ligação a regiões distantes" — optimistic update,
@@ -107,5 +138,23 @@ class GamesViewModel {
     func saveSettings() {
         let data = try? JSONEncoder().encode(streamSettings)
         UserDefaults.standard.set(data, forKey: "boosteroid.streamSettings")
+    }
+
+    func toggleFavorite(_ game: GameInfo) {
+        if favoriteIDs.contains(game.id) {
+            favoriteIDs.remove(game.id)
+        } else {
+            favoriteIDs.insert(game.id)
+        }
+        UserDefaults.standard.set(Array(favoriteIDs).sorted(), forKey: "boosteroid.favoriteGameIDs")
+    }
+
+    func isFavorite(_ game: GameInfo) -> Bool {
+        favoriteIDs.contains(game.id)
+    }
+
+    func markPlayed(_ game: GameInfo) {
+        lastPlayedGameID = game.id
+        UserDefaults.standard.set(game.id, forKey: "boosteroid.lastPlayedGameID")
     }
 }

@@ -345,15 +345,91 @@ nonisolated struct ActiveSessionInfo {
 // GET /api/v1/boostore/applications/{id} (single game) and
 // GET /api/v1/boostore/carousel?isSub=true (hero banner) presumably share
 // this same per-application shape; TODO(protocol) confirm once used.
-nonisolated struct BoosteroidApplicationDTO: Codable {
+nonisolated struct BoosteroidNamedValue: Decodable {
+    let name: String?
+
+    init(from decoder: Decoder) throws {
+        if let value = try? decoder.singleValueContainer().decode(String.self) {
+            name = value
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+            ?? container.decodeIfPresent(String.self, forKey: .title)
+            ?? container.decodeIfPresent(String.self, forKey: .label)
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, title, label }
+}
+
+nonisolated struct BoosteroidApplicationDTO: Decodable {
     let id: Int
     let name: String
     let icon: String?
+    let coverImage: String?
     let bannerImage: String?
     let installed: Bool
+    let genres: [BoosteroidNamedValue]
+    let tags: [BoosteroidNamedValue]
+    let developer: BoosteroidNamedValue?
+    let publisher: BoosteroidNamedValue?
+    let summary: String?
+    let rating: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        icon = try c.decodeIfPresent(String.self, forKey: .icon)
+        // Catalog/detail responses are not completely uniform. Some games
+        // (including The Callisto Protocol) expose their tile art under a
+        // cover/poster key instead of `icon`.
+        coverImage = Self.firstString(c, [
+            .coverImage, .coverImageSnake, .verticalImage, .verticalImageSnake,
+            .poster, .cover, .cardImage, .cardImageSnake, .image
+        ])
+        // Boosteroid has returned both camelCase and snake_case names from
+        // different catalog endpoints. The installed-library response uses
+        // `bannerImage`; losing that value made hero views fall back to the
+        // small square `icon` and stretch it across the screen.
+        bannerImage = (try? c.decodeIfPresent(String.self, forKey: .bannerImage))
+            ?? (try? c.decodeIfPresent(String.self, forKey: .bannerImageSnake))
+        installed = (try? c.decode(Bool.self, forKey: .installed)) ?? true
+        genres = (try? c.decode([BoosteroidNamedValue].self, forKey: .genres))
+            ?? (try? c.decode([BoosteroidNamedValue].self, forKey: .genre)) ?? []
+        tags = (try? c.decode([BoosteroidNamedValue].self, forKey: .tags)) ?? []
+        developer = try? c.decodeIfPresent(BoosteroidNamedValue.self, forKey: .developer)
+        publisher = try? c.decodeIfPresent(BoosteroidNamedValue.self, forKey: .publisher)
+        summary = Self.firstString(c, [.summary, .description, .shortDescription, .about])
+        rating = Self.firstString(c, [.rating, .ageRating, .pegi, .esrb])
+    }
+
+    private static func firstString(_ c: KeyedDecodingContainer<CodingKeys>, _ keys: [CodingKeys]) -> String? {
+        for key in keys {
+            if let value = try? c.decodeIfPresent(String.self, forKey: key), !value.isEmpty { return value }
+            if let value = try? c.decodeIfPresent(Int.self, forKey: key) { return String(value) }
+        }
+        return nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, icon, installed, genres, genre, tags, developer, publisher
+        case summary, description, about, rating, pegi, esrb
+        case bannerImage
+        case bannerImageSnake = "banner_image"
+        case coverImage
+        case coverImageSnake = "cover_image"
+        case verticalImage
+        case verticalImageSnake = "vertical_image"
+        case poster, cover, image
+        case cardImage
+        case cardImageSnake = "card_image"
+        case shortDescription = "short_description"
+        case ageRating = "age_rating"
+    }
 }
 
-nonisolated struct BoosteroidPaginatedApplications: Codable {
+nonisolated struct BoosteroidPaginatedApplications: Decodable {
     let data: [BoosteroidApplicationDTO]
 }
 
@@ -361,13 +437,29 @@ nonisolated struct GameInfo: Identifiable, Equatable {
     let id: String
     let title: String
     let boxArtUrl: String?
+    let heroBannerUrl: String?
     var isInLibrary: Bool
+    let genres: [String]
+    let tags: [String]
+    let developer: String?
+    let publisher: String?
+    let summary: String?
+    let rating: String?
 
-    init(id: String, title: String, boxArtUrl: String?, isInLibrary: Bool) {
+    init(id: String, title: String, boxArtUrl: String?, heroBannerUrl: String? = nil, isInLibrary: Bool,
+         genres: [String] = [], tags: [String] = [], developer: String? = nil,
+         publisher: String? = nil, summary: String? = nil, rating: String? = nil) {
         self.id = id
         self.title = title
         self.boxArtUrl = boxArtUrl
+        self.heroBannerUrl = heroBannerUrl
         self.isInLibrary = isInLibrary
+        self.genres = genres
+        self.tags = tags
+        self.developer = developer
+        self.publisher = publisher
+        self.summary = summary
+        self.rating = rating
     }
 
     init(_ dto: BoosteroidApplicationDTO) {
@@ -375,8 +467,38 @@ nonisolated struct GameInfo: Identifiable, Equatable {
         self.title = dto.name
         // `icon` (square) for grid tiles — `bannerImage` is a wide 16:9
         // banner, wrong shape for the portrait/square tiles HomeView draws.
-        self.boxArtUrl = dto.icon ?? dto.bannerImage
+        self.boxArtUrl = dto.coverImage ?? dto.icon ?? dto.bannerImage
+        // Never promote the square catalog icon to hero artwork. A missing
+        // banner should render the app's backdrop instead of a visibly
+        // enlarged low-resolution tile.
+        self.heroBannerUrl = dto.bannerImage
         self.isInLibrary = dto.installed
+        self.genres = dto.genres.compactMap(\.name)
+        self.tags = dto.tags.compactMap(\.name)
+        self.developer = dto.developer?.name
+        self.publisher = dto.publisher?.name
+        self.summary = dto.summary
+        self.rating = dto.rating
+    }
+
+    /// Adds detail-endpoint metadata without replacing the installed-list's
+    /// correctly shaped artwork. Boosteroid's detail response often falls
+    /// back to its square icon when no banner is present; using that result
+    /// directly stretched the icon across Home and overview hero cards.
+    func enriched(with detail: GameInfo) -> GameInfo {
+        GameInfo(
+            id: id,
+            title: title,
+            boxArtUrl: boxArtUrl ?? detail.boxArtUrl,
+            heroBannerUrl: heroBannerUrl ?? detail.heroBannerUrl,
+            isInLibrary: isInLibrary,
+            genres: detail.genres.isEmpty ? genres : detail.genres,
+            tags: detail.tags.isEmpty ? tags : detail.tags,
+            developer: detail.developer ?? developer,
+            publisher: detail.publisher ?? publisher,
+            summary: detail.summary ?? summary,
+            rating: detail.rating ?? rating
+        )
     }
 }
 

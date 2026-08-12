@@ -41,7 +41,16 @@ final class VideoSurfaceView: UIView {
             guard pointerModeActive != oldValue else { return }
             pointerPanRecognizer?.isEnabled = pointerModeActive
             pointerTapRecognizer?.isEnabled = pointerModeActive
-            if pointerModeActive { calibratePointer() }
+            if pointerModeActive {
+                calibratePointer()
+            } else {
+                absolutePointer = nil
+                inputHandler?.setMouseMode(
+                    enabled: false,
+                    x: Int(streamSurfaceSize.width),
+                    y: Int(streamSurfaceSize.height)
+                )
+            }
         }
     }
     private weak var pointerPanRecognizer: UIPanGestureRecognizer?
@@ -131,7 +140,7 @@ final class VideoSurfaceView: UIView {
     private func calibratePointer() {
         let centre = CGPoint(x: streamSurfaceSize.width / 2, y: streamSurfaceSize.height / 2)
         absolutePointer = centre
-        inputHandler?.sendMouseAbsolute(x: Int(centre.x), y: Int(centre.y))
+        inputHandler?.setMouseMode(enabled: true, x: Int(centre.x), y: Int(centre.y))
         pointerPositionHandler?(centre)
     }
 

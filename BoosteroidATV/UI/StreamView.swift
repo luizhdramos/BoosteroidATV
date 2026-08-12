@@ -1,4 +1,27 @@
 import SwiftUI
+
+/// Matches the compact 54-point settings choices and replaces tvOS's
+/// oversized default focused button capsule in the in-game toolbar.
+private struct StreamControlButtonStyle: ButtonStyle {
+    let active: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .imageScale(.medium)
+            .foregroundStyle(isFocused ? .black : .white)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 54)
+            .background(
+                isFocused ? Color.white
+                    : active ? BoosteroidTheme.violet
+                    : Color.white.opacity(0.16),
+                in: Capsule()
+            )
+            .opacity(configuration.isPressed ? 0.78 : 1)
+    }
+}
 import UIKit
 
 /// Windows Virtual-Key codes — shared by the top-bar overlay (Steam Overlay
@@ -111,24 +134,24 @@ struct StreamView: View {
                 if let errorMessage {
                     statusView(title: "Couldn't Start Session", message: errorMessage)
                 } else {
-                    VStack(spacing: 32) {
-                        Text(game.title)
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(.white)
+                    loadingBackground
 
-                        // Commercial-style progress timeline: Queue -> Machine
-                        // Found -> Preparing/Ready, filling with the brand's
-                        // purple gradient (same as the bolt logo) as each
-                        // stage completes, instead of a generic spinner.
-                        sessionTimeline
-                            .frame(maxWidth: 720)
-                            .animation(.easeInOut(duration: 0.4), value: currentStageIndex)
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(game.title)
+                            .font(.largeTitle.weight(.bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
 
                         Text(timelineDetail)
-                            .font(.subheadline)
+                            .font(.title3)
                             .foregroundStyle(.white.opacity(0.85))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 60)
+
+                        ProgressView(value: loadingProgress)
+                            .progressViewStyle(.linear)
+                            .tint(BoosteroidTheme.violet)
+                            .frame(maxWidth: 560)
+                            .padding(.top, 8)
+                            .animation(.easeInOut(duration: 0.4), value: currentStageIndex)
 
                         // Which physical server the session actually landed
                         // on — only known once resolvedSession.nodeBaseUrl is
@@ -143,8 +166,12 @@ struct StreamView: View {
 
                         Button("Cancel") { onDismiss() }
                             .buttonStyle(.bordered)
-                            .tint(.gray)
+                            .tint(.secondary)
+                            .padding(.top, 8)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 90)
+                    .padding(.top, 80)
                 }
             case .streaming:
                 VideoSurfaceViewRepresentable(
@@ -249,6 +276,12 @@ struct StreamView: View {
         // Start+Select specifically.
         .onReceive(NotificationCenter.default.publisher(for: .gamepadPauseComboPressed)) { _ in
             togglePauseBar()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gamepadInputBegan)) { _ in
+            // A controller press means the user has returned to gamepad play.
+            // Turn off the locally drawn pointer; InputSender simultaneously
+            // hides and parks the remote Windows cursor.
+            pointerMode = false
         }
     }
 
@@ -393,35 +426,49 @@ struct StreamView: View {
         }
     }
 
-    /// Discreet single-line performance overlay pinned to the top-left edge:
-    /// "Bitrate: 2.3 Mbps | Stream FPS: 120 | Latency: 13ms". Codec is omitted
-    /// (Apple TV only ever gets H.264).
+    /// Single-line performance strip across the top, keeping the center and
+    /// sides of the game visible instead of occupying a tall corner panel.
     private var statsOverlay: some View {
         let mbps = Double(controller.stats.bitrateKbps) / 1000
-        var line = "Bitrate: \(String(format: "%.1f", mbps)) Mbps | Stream FPS: \(controller.streamFps) | Latency: \(controller.rttMs)ms"
-        if let connectedServerName { line += " | Server: \(connectedServerName)" }
-        // Video and input ride entirely separate connections — the control
-        // channel can silently die (network blip, server timeout) while video
-        // keeps playing perfectly, leaving mouse/keyboard/controller dead with
-        // no other visible sign. Surfaced here so it's caught even when
-        // pointer mode is off. See controlChannelAlive's doc comment.
-        if !controller.controlChannelAlive { line += " | INPUT CHANNEL DEAD" }
-        return VStack {
-            HStack {
-                Text(line)
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(controller.controlChannelAlive ? .white.opacity(0.9) : .red)
-                    .shadow(color: .black.opacity(0.8), radius: 2, x: 0, y: 1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.35), in: Capsule())
-                Spacer()
+        return HStack(spacing: 22) {
+            Text("STREAM")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .tracking(1.6)
+                .foregroundStyle(BoosteroidTheme.violet)
+            Circle()
+                .fill(controller.controlChannelAlive ? .green : .red)
+                .frame(width: 8, height: 8)
+            statsDivider
+            statsItem("Bitrate", "\(String(format: "%.1f", mbps)) Mbps")
+            statsDivider
+            statsItem("FPS", "\(controller.streamFps)")
+            statsDivider
+            statsItem("Latency", "\(controller.rttMs) ms")
+            if let connectedServerName {
+                statsDivider
+                statsItem("Server", connectedServerName)
             }
-            Spacer()
         }
-        .padding(.top, 8)
-        .padding(.leading, 8)
+        .padding(.horizontal, 24)
+        .frame(height: 52)
+        .background(.black.opacity(0.82), in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.12)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 4)
+        .ignoresSafeArea(edges: .top)
         .allowsHitTesting(false)
+    }
+
+    private var statsDivider: some View {
+        Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 22)
+    }
+
+    private func statsItem(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label).foregroundStyle(.white.opacity(0.62))
+            Text(value).foregroundStyle(.white).lineLimit(1)
+        }
+        .font(.system(size: 14, weight: .semibold, design: .monospaced))
     }
 
     // MARK: In-Stream Top Bar
@@ -466,12 +513,10 @@ struct StreamView: View {
                         onDismiss()
                     }
                 } label: {
-                    Label(isDisconnecting ? "Ending session…" : "Disconnect",
-                          systemImage: "xmark.circle")
+                    Label(isDisconnecting ? "Ending session…" : "Disconnect", systemImage: "xmark.circle")
                 }
                 .disabled(isDisconnecting)
-                .buttonStyle(.bordered)
-                .tint(.gray)
+                .buttonStyle(StreamControlButtonStyle(active: false))
 
                 Spacer()
 
@@ -540,13 +585,8 @@ struct StreamView: View {
                              action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .padding(.horizontal, 4)
         }
-        .buttonStyle(.bordered)
-        // Manually white when "on" (matches SettingsView's OptionRow
-        // convention for a persistent selected state), gray otherwise — tvOS
-        // still auto-inverts to white-on-dark on focus on top of this.
-        .tint(active ? .white : .gray)
+        .buttonStyle(StreamControlButtonStyle(active: active))
     }
 
     /// A smaller, fixed font for the flyout rows — the system's default
@@ -609,6 +649,52 @@ struct StreamView: View {
     }
 
     // MARK: Loading Timeline
+
+    @ViewBuilder
+    private var loadingBackground: some View {
+        if let urlString = game.heroBannerUrl, let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                default:
+                    BoosteroidTheme.background
+                }
+            }
+            .ignoresSafeArea()
+            .overlay {
+                LinearGradient(
+                    stops: [
+                        .init(color: .black.opacity(0.88), location: 0),
+                        .init(color: .black.opacity(0.62), location: 0.48),
+                        .init(color: .black.opacity(0.35), location: 1),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            }
+        }
+    }
+
+    /// A restrained, always-forward launch indicator matching the GeForce
+    /// Now loading screen while Boosteroid's real queue state remains the
+    /// source of truth.
+    private var loadingProgress: Double {
+        switch currentStageIndex {
+        case 0:
+            if let queuePosition {
+                return min(max(0.12 + (1.0 / Double(max(queuePosition, 1))) * 0.28, 0.12), 0.4)
+            }
+            return 0.18
+        case 1:
+            return 0.58
+        default:
+            return isPreparingFinished ? 0.96 : 0.78
+        }
+    }
 
     /// Coarse progress for the loading timeline: 0 = still queued, 1 = a
     /// machine has been matched/claimed, 2 = WebRTC is actively negotiating
