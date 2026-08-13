@@ -516,43 +516,20 @@ private struct GameCard: View {
     let game: GameInfo
     let onPlay: (GameInfo) -> Void
 
+    // No fixed aspect and no title. The card used to force a 2:3 portrait and
+    // fill it, which cropped every game whose art isn't portrait — Boosteroid
+    // only has cover art for some, and the rest fall back to a square icon or
+    // a 16:9 banner. The card now takes its height from the artwork itself, so
+    // each one is exactly the size of its image with nothing cut off and no
+    // leftover gradient padding it out.
     var body: some View {
         Button { onPlay(game) } label: {
-            Color.clear
-                .aspectRatio(2 / 3, contentMode: .fit)
-                .background(BoosteroidTheme.cardGradient)
-                .overlay {
-                    artwork
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                }
-                .overlay {
-                    LinearGradient(
-                        colors: [.black.opacity(0.7), .clear],
-                        startPoint: .bottom,
-                        endPoint: .center
-                    )
-                }
-                .overlay(alignment: .bottomLeading) {
-                    Text(game.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .padding(10)
-                }
+            artwork
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.card)
-        .aspectRatio(2 / 3, contentMode: .fit)
     }
 
-    // .fit, not .fill. The card is a fixed 2:3 portrait, but only some games
-    // have portrait cover art — the rest fall back to a square icon or a 16:9
-    // banner (see GameInfo.boxArtUrl). Filling a 2:3 frame with a square image
-    // cuts about a third off each side, and with a banner it cuts far more,
-    // which is the reported truncation. Fitting shows the whole image and lets
-    // the card's gradient show through around it; a true 2:3 cover still fills
-    // the card exactly, so nothing changes for the games that have one.
     @ViewBuilder
     private var artwork: some View {
         if let value = game.boxArtUrl, let url = URL(string: value) {
@@ -588,10 +565,22 @@ private struct GameCard: View {
         }
     }
 
+    /// Square on purpose: with the card sized by its artwork, a shape with no
+    /// intrinsic aspect would collapse to nothing while the image loads. This
+    /// also carries the title, since it's the one case where the card has no
+    /// art to identify the game by.
     private var placeholder: some View {
         Rectangle()
             .fill(BoosteroidTheme.cardGradient)
-            .overlay(Image(systemName: "gamecontroller.fill").font(.largeTitle))
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                Text(game.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .padding(10)
+            }
     }
 }
 
