@@ -117,21 +117,6 @@ struct HomeView: View {
     }
 
     @ViewBuilder
-    private func artwork(for game: GameInfo) -> some View {
-        if let urlString = game.boxArtUrl, let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-                if case .success(let image) = phase {
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    placeholder(for: game)
-                }
-            }
-        } else {
-            placeholder(for: game)
-        }
-    }
-
-    @ViewBuilder
     private func heroArtwork(for game: GameInfo) -> some View {
         if let urlString = game.heroBannerUrl, let url = URL(string: urlString) {
             AsyncImage(url: url) { phase in
@@ -535,6 +520,7 @@ private struct GameCard: View {
         Button { onPlay(game) } label: {
             Color.clear
                 .aspectRatio(2 / 3, contentMode: .fit)
+                .background(BoosteroidTheme.cardGradient)
                 .overlay {
                     artwork
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -560,13 +546,20 @@ private struct GameCard: View {
         .aspectRatio(2 / 3, contentMode: .fit)
     }
 
+    // .fit, not .fill. The card is a fixed 2:3 portrait, but only some games
+    // have portrait cover art — the rest fall back to a square icon or a 16:9
+    // banner (see GameInfo.boxArtUrl). Filling a 2:3 frame with a square image
+    // cuts about a third off each side, and with a banner it cuts far more,
+    // which is the reported truncation. Fitting shows the whole image and lets
+    // the card's gradient show through around it; a true 2:3 cover still fills
+    // the card exactly, so nothing changes for the games that have one.
     @ViewBuilder
     private var artwork: some View {
         if let value = game.boxArtUrl, let url = URL(string: value) {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
-                    image.resizable().aspectRatio(contentMode: .fill)
+                    image.resizable().aspectRatio(contentMode: .fit)
                 case .failure:
                     bannerFallback
                 case .empty:
@@ -585,7 +578,7 @@ private struct GameCard: View {
         if let value = game.heroBannerUrl, let url = URL(string: value) {
             AsyncImage(url: url) { phase in
                 if case .success(let image) = phase {
-                    image.resizable().aspectRatio(contentMode: .fill)
+                    image.resizable().aspectRatio(contentMode: .fit)
                 } else {
                     placeholder
                 }
