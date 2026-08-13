@@ -93,7 +93,14 @@ final class VideoSurfaceView: UIView {
 
     private func setup() {
         backgroundColor = .black
-        displayLayer.videoGravity = .resizeAspectFill
+        // .resizeAspect, not .resizeAspectFill: Fill crops whatever doesn't fit
+        // the screen's aspect, silently cutting the edges off the game — where
+        // health bars, minimaps and ammo counters live. Reported as the picture
+        // sitting slightly outside the frame. When the decoded frame really is
+        // 16:9 on a 16:9 screen the two are identical, so this costs nothing in
+        // the normal case and only shows letterboxing when the alternative
+        // would have been losing part of the image.
+        displayLayer.videoGravity = .resizeAspect
         var tb: CMTimebase?
         CMTimebaseCreateWithSourceClock(allocator: nil, sourceClock: CMClockGetHostTimeClock(), timebaseOut: &tb)
         if let tb {

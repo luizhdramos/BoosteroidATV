@@ -430,6 +430,13 @@ struct StreamView: View {
             statsDivider
             statsItem("Bitrate", "\(String(format: "%.1f", mbps)) Mbps")
             statsDivider
+            // The size actually being decoded, which can differ from what
+            // Settings requested — and if its aspect doesn't match the screen,
+            // that's what puts black bars around the picture.
+            if controller.stats.resolutionWidth > 0 {
+                statsItem("Size", "\(controller.stats.resolutionWidth)×\(controller.stats.resolutionHeight)")
+                statsDivider
+            }
             statsItem("FPS", "\(controller.streamFps)")
             statsDivider
             statsItem("Latency", "\(controller.rttMs) ms")
