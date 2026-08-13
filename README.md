@@ -21,7 +21,7 @@ It is built in the same spirit as its sibling project **[CloudNow](https://githu
 ## Features
 
 - **Native tvOS experience** — built for the Siri Remote and a couch, not a ported web page.
-- **Your Boosteroid library** — sign in with your account and your installed games are right there.
+- **Your Boosteroid library** — sign in with your account and your installed games are right there, with search, sorting and favorites.
 - **Low-latency streaming** — H.264 video and audio over WebRTC, the same path the official web client uses.
 - **Full controller support** — MFi / Xbox / PlayStation / Nintendo Switch gamepads, with buttons, triggers, sticks and D-pad all mapped exactly as the official clients do.
 - **Controller rumble** — with an on/off toggle and an intensity setting (Automatic, Weak, Medium, Strong, Very Strong). Some third-party pads running in a compatibility or Xbox emulation mode don't implement vibration at all, even though their buttons work fine; that's a controller limitation the app can't work around.
@@ -92,11 +92,11 @@ This is an **experimental** client. Signing in, launching a game, streaming, and
 
 - **H.264 only.** Boosteroid delivers H.265 and AV1 only over a transport this app doesn't implement, so streams are H.264. Apple TV can decode HEVC — this is a service-side limit, not a device one.
 - **Disconnecting doesn't free the machine right away.** Boosteroid keeps your machine warm for a while after a session ends, so reconnecting soon after resumes the running game instead of starting fresh. The official clients behave the same way.
-- **No catalog browsing yet.** Home shows your installed library as a grid; there's no search, store browsing, or "Continue Playing"/Favorites rows yet.
+- **No store browsing.** You can browse, search and favorite the games already in your library, but adding new ones still has to be done from another Boosteroid client.
 
 ## Roadmap
 
-- Richer catalog browsing (store / search / carousels, Continue Playing / Favorites rows)
+- Store browsing, so games can be added without another Boosteroid client
 - Community testing across more controller models, especially around rumble
 - H.265/AV1 video — a large piece of work, since it needs a transport this app doesn't currently implement
 
