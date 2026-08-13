@@ -80,10 +80,9 @@ actor BoosteroidRealtimeClient {
         /// The claim requires a `sessionToken` (CONFIRMED: posting without one
         /// returns 422 "The session token field is required", and the session
         /// UUID is NOT it — that returns 400). It isn't in any REST response we
-        /// can see, so it must ride along in this push; `sessionToken` is
-        /// extracted leniently and `valueKeys` reports the payload's actual
-        /// field names so the exact shape can be pinned down on first sight.
-        case queueReady(appId: Int?, sessionToken: String?, valueKeys: [String])
+        /// can see, so it must ride along in this push, and `sessionToken` is
+        /// extracted leniently as a result.
+        case queueReady(appId: Int?, sessionToken: String?)
         /// Surfaced for anything not recognized as a queue update, so real
         /// device testing can capture the still-unconfirmed "ready" message
         /// shape (see header comment).
@@ -187,8 +186,7 @@ actor BoosteroidRealtimeClient {
             let value = obj["value"] as? [String: Any]
             continuation.yield(.queueReady(
                 appId: Self.asInt(value?["appId"]),
-                sessionToken: Self.extractToken(from: value, fallback: obj),
-                valueKeys: (value?.keys).map { Array($0).sorted() } ?? []
+                sessionToken: Self.extractToken(from: value, fallback: obj)
             ))
             return
         }

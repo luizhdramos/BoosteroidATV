@@ -50,8 +50,6 @@ final class StreamController: NSObject {
     /// The DTLS/overall peer connection state — distinguishes "ICE connected
     /// but DTLS never completed" (data channel never opens, server sends no
     /// media) from "fully connected".
-    private(set) var peerConnState: String = "new"
-    private(set) var dataChannelState: String = "-"
     // Per-second rates for the overlay: Stream FPS = frames arriving from the
     // server, RTT = network round-trip. Computed as deltas across the ~1s
     // stats tick.
@@ -476,8 +474,6 @@ final class StreamController: NSObject {
         statsTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self, let pc = self.peerConnection else { return }
-                self.peerConnState = Self.peerStateLabel(pc.connectionState)
-                self.dataChannelState = Self.dcStateLabel(self.clientDataChannel?.readyState)
 
                 // Async getStats — no completion closure, so no nested Task and
                 // nothing captured off the main actor. Parse the standard
@@ -529,28 +525,6 @@ final class StreamController: NSObject {
         }
     }
 
-    nonisolated private static func peerStateLabel(_ s: LKRTCPeerConnectionState) -> String {
-        switch s {
-        case .new: return "new"
-        case .connecting: return "connecting"
-        case .connected: return "connected"
-        case .disconnected: return "disconnected"
-        case .failed: return "failed"
-        case .closed: return "closed"
-        @unknown default: return "unknown"
-        }
-    }
-
-    nonisolated private static func dcStateLabel(_ s: LKRTCDataChannelState?) -> String {
-        switch s {
-        case .connecting: return "connecting"
-        case .open: return "open"
-        case .closing: return "closing"
-        case .closed: return "closed"
-        case nil: return "-"
-        @unknown default: return "?"
-        }
-    }
 }
 
 // MARK: - Errors

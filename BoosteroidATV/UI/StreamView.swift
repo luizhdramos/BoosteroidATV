@@ -75,9 +75,7 @@ struct StreamView: View {
     let onDismiss: () -> Void
 
     @Environment(AuthManager.self) var authManager
-    /// Used only to name an unexpected appId seen in a queue push (see
-    /// watchQueuePosition) — tells "another game's queue" apart from "the
-    /// same game under a different id".
+    /// Resolves the connected gateway host to a friendly server name.
     @Environment(GamesViewModel.self) var gamesViewModel
     @State private var controller = StreamController()
     @State private var showOverlay = false
@@ -94,22 +92,13 @@ struct StreamView: View {
     /// of this session only (not persisted — Settings remains the default).
     @State private var statsOverlayOverride: Bool?
     @State private var errorMessage: String?
-    @State private var queueAttempt = 0
     @State private var queueStatus = ""
-    @State private var queueStartedAt = Date()
     @State private var queuePosition: Int?
     @State private var queueEta: Int?
-    /// Diagnostics for "some games never show a queue position" — see
-    /// watchQueuePosition().
-    @State private var queueDebug = ""
-    /// Last result of the session/start "claim the machine" call.
-    @State private var claimResult = ""
     /// Ensures the machine is claimed exactly once (the endpoint is rate-limited).
     @State private var didClaimMachine = false
     /// Host named by the claim response, if any — overrides the guessed one.
     @State private var claimedGateway: String?
-    @State private var queueUpdatesSeen = 0
-    @State private var seenAppIds: [Int] = []
     @State private var realtimeClient = BoosteroidRealtimeClient()
     /// One shared client so the queues/start token can redirect the readiness
     /// polling that start() is already running (see setPreferredSessionId).
@@ -730,55 +719,7 @@ struct StreamView: View {
         }
     }
 
-    private var sessionTimeline: some View {
-        let index = currentStageIndex
-        let labels = ["Queue", "Machine Found", isPreparingFinished ? "Machine Ready" : "Preparing Machine"]
-        return HStack(alignment: .top, spacing: 0) {
-            ForEach(labels.indices, id: \.self) { i in
-                timelineNode(label: labels[i], reached: i <= index, active: i == index)
-                if i < labels.count - 1 {
-                    timelineConnector(filled: i < index)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func timelineNode(label: String, reached: Bool, active: Bool) -> some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(reached ? AnyShapeStyle(BoosteroidTheme.brandGradient) : AnyShapeStyle(Color.white.opacity(0.15)))
-                    .frame(width: 22, height: 22)
-                if active {
-                    Circle()
-                        .stroke(BoosteroidTheme.brandGradient, lineWidth: 2)
-                        .frame(width: 32, height: 32)
-                } else if reached {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .black))
-                        .foregroundStyle(.white)
-                }
-            }
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(reached ? .white : .secondary)
-                .multilineTextAlignment(.center)
-                .frame(width: 130)
-        }
-    }
-
-    @ViewBuilder
-    private func timelineConnector(filled: Bool) -> some View {
-        Rectangle()
-            .fill(filled ? AnyShapeStyle(BoosteroidTheme.brandGradient) : AnyShapeStyle(Color.white.opacity(0.15)))
-            .frame(height: 3)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 11) // centers on the 22pt circle above
-    }
-
     private func start() async {
-        queueStartedAt = Date()
         // Best-effort: the numeric queue position only comes from
         // BoosteroidRealtimeClient's WebSocket feed, which is a "nice to
         // have" — the actual queue -> active detection below relies solely
@@ -801,7 +742,6 @@ struct StreamView: View {
                 SessionCreateRequest(gameId: game.id, settings: settings),
                 cookies: cookies,
                 onPoll: { info, attempt in
-                    queueAttempt = attempt
                     queueStatus = info.status
                 }
             )
@@ -883,40 +823,19 @@ struct StreamView: View {
     /// actually decides when to proceed.
     private func watchQueuePosition() async {
         guard let (userId, token) = try? await authManager.resolveRealtimeCredentials() else { return }
-        guard let targetAppId = Int(game.id) else {
-            queueDebug = "game id '\(game.id)' isn't numeric — can't match queue pushes"
-            return
-        }
+        guard let targetAppId = Int(game.id) else { return }
         for await event in await realtimeClient.connect(userId: userId, token: token) {
             if Task.isCancelled { break }
             switch event {
             case .queueUpdate(let appId, let position, let eta):
-                queueUpdatesSeen += 1
-                if !seenAppIds.contains(appId) { seenAppIds.append(appId) }
-
+                // These pushes cover every queue the account is in, including
+                // leftovers from games launched earlier, so only this game's
+                // updates are of any use here.
                 if appId == targetAppId {
                     queuePosition = position
                     queueEta = eta
-                    queueDebug = ""
-                    continue
                 }
-
-                // CONFIRMED (see BoosteroidRealtimeClient): these pushes cover
-                // every queue the account is in, including leftovers from games
-                // launched earlier that keep counting down. If we're only
-                // hearing about OTHER games, say so plainly — that other queue
-                // is usually the one actually holding the account's slot, which
-                // is why this game seems stuck with no position.
-                if queuePosition == nil {
-                    let others = seenAppIds
-                        .filter { $0 != targetAppId }
-                        .map { id in gamesViewModel.library.first { Int($0.id) == id }?.title ?? "app \(id)" }
-                    if let other = others.last {
-                        queueDebug = "No queue position reported for this game. You're also queued for \(other)" +
-                            (position.map { " (position \($0))" } ?? "") + "."
-                    }
-                }
-            case .queueReady(let appId, let sessionToken, let valueKeys):
+            case .queueReady(let appId, let sessionToken):
                 // The machine-is-ready signal. Claim ONCE — this reservation is
                 // short-lived, but the endpoint is rate-limited (a retry loop
                 // earned a 429), so exactly one call, mirroring the browser's
@@ -938,7 +857,6 @@ struct StreamView: View {
                 // after seeing only the no-queue path; that was wrong.
                 guard !didClaimMachine, appId == nil || appId == targetAppId else { continue }
                 didClaimMachine = true
-                claimResult = "Machine ready — confirming…"
                 guard let cookies = try? await authManager.resolveCookies() else { continue }
 
                 // The token IS the real session's id. last-session keeps
@@ -951,12 +869,6 @@ struct StreamView: View {
                 let result = await client.startStreamingSession(
                     appId: targetAppId, sessionToken: sessionToken, cookies: cookies
                 )
-                // Report the token/fields either way: the exact spelling of the
-                // token field in this push still hasn't been captured, and a
-                // claim can return 2xx while the machine never gets assigned.
-                let tokenNote = sessionToken == nil
-                    ? "no token (fields: [\(valueKeys.joined(separator: ","))])"
-                    : "token ok"
                 if (200...299).contains(result.status) {
                     // 201 Created means the server made something and described
                     // it in the body. Polling the token alone still timed out,
@@ -972,10 +884,6 @@ struct StreamView: View {
                         // to proceed (no `gw` is ever sent while status is UN).
                         await client.setPreferredGateway(host)
                     }
-                    claimResult = "Confirmed (\(result.status)) — "
-                        + (claimedGateway.map { "host \($0)" } ?? "NO host parsed: \(result.body.prefix(120))")
-                } else {
-                    claimResult = "Confirm failed (\(result.status), \(tokenNote)): \(result.body.prefix(70))"
                 }
             case .raw, .closed, .failed:
                 continue
