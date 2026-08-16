@@ -1,29 +1,46 @@
 #!/usr/bin/env bash
 #
-# Blocks commits that would put a personal Apple Developer Team ID into the
-# repository.
+# Blocks commits carrying local signing configuration into the repository.
 #
-# Xcode rewrites DEVELOPMENT_TEAM back into project.pbxproj whenever you build
-# with a team selected in Signing & Capabilities. It has silently ridden along
-# in a `git add -A` and reached the public repo twice now, so this checks
-# rather than relying on anyone noticing the line in a diff.
+# Xcode rewrites both of these into project.pbxproj as you work: DEVELOPMENT_TEAM
+# whenever you build with a team selected, and PRODUCT_BUNDLE_IDENTIFIER if you
+# change it to get around an App ID that's already registered to another team.
+# Both are personal to whoever is building, and both have ridden along in a
+# `git add -A` before — the team id reached the public repo twice. Noticing
+# them in a diff has already failed, so this checks instead.
 #
 # Install:
 #   ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 #
-# Bypass, if you ever genuinely need to:
+# Bypass, if a change to either is genuinely intended:
 #   git commit --no-verify
 
-if git diff --cached -U0 | grep -qE '^\+.*DEVELOPMENT_TEAM = [A-Z0-9]{10}'; then
-    echo "pre-commit: refusing — this commit adds a DEVELOPMENT_TEAM to the project." >&2
+# Scoped to the project file: these settings only mean anything there, and
+# checking the whole diff made this script block its own commit, since it
+# necessarily mentions the very strings it looks for.
+staged=$(git diff --cached -U0 -- '*.pbxproj')
+blocked=false
+
+if grep -qE '^\+.*DEVELOPMENT_TEAM = [A-Z0-9]{10}' <<<"$staged"; then
+    echo "pre-commit: this commit adds a personal Apple Developer Team ID." >&2
+    blocked=true
+fi
+
+if grep -qE '^\+.*PRODUCT_BUNDLE_IDENTIFIER' <<<"$staged"; then
+    echo "pre-commit: this commit changes the bundle identifier, which is" >&2
+    echo "            usually a local workaround for App ID registration." >&2
+    blocked=true
+fi
+
+if $blocked; then
     echo >&2
-    git diff --cached -U0 --name-only -G'DEVELOPMENT_TEAM = [A-Z0-9]{10}' | sed 's/^/  /' >&2
+    git diff --cached --name-only -- '*.pbxproj' | sed 's/^/  /' >&2
     echo >&2
-    echo "Xcode writes that line back whenever you build with a team selected." >&2
-    echo "Drop it before committing:" >&2
-    echo "  sed -i '' '/DEVELOPMENT_TEAM = [A-Z0-9]\\{10\\};/d' BoosteroidATV.xcodeproj/project.pbxproj" >&2
+    echo "Drop them before committing:" >&2
+    echo "  git checkout -- BoosteroidATV.xcodeproj/project.pbxproj" >&2
     echo >&2
-    echo "Signing still works — Xcode keeps your team in local state, not in the" >&2
-    echo "project file. See Local.xcconfig.example." >&2
+    echo "That only reverts the project file — Xcode keeps your team and any" >&2
+    echo "bundle id override in its own local state, so signing still works." >&2
+    echo "See Local.xcconfig.example." >&2
     exit 1
 fi
