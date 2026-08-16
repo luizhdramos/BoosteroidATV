@@ -59,6 +59,12 @@ Needs **Xcode 16 or newer**. The WebRTC dependency is already referenced in the 
    ```
 2. Let Swift Package Manager resolve the WebRTC dependency. If it fails, use **File → Packages → Reset Package Caches** then **Resolve Package Versions** (the xcframework is a large binary download and needs a working connection).
 3. Configure signing: select the **BoosteroidATV** target → **Signing & Capabilities** and pick your own team (Automatic signing). See `Local.xcconfig.example` for an xcconfig-based alternative.
+
+   Xcode writes your team id into `project.pbxproj` when it does this, which shouldn't be committed. Install the hook that catches it:
+
+   ```sh
+   ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+   ```
 4. Select an Apple TV (or the tvOS Simulator) as the run destination and build & run (⌘R).
 
 ### Building a .ipa
