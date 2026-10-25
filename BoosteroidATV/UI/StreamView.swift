@@ -921,6 +921,15 @@ struct VirtualKeyboardView: View {
     private let homeRow: [String] = ["A","S","D","F","G","H","J","K","L"]
     private let bottomRow: [String] = ["Z","X","C","V","B","N","M"]
 
+    /// US-layout Shift variants, shown on the key while Shift is on so the
+    /// symbol the remote side will type is visible.
+    private let shiftedSymbols: [String: String] = [
+        "`": "~", "1": "!", "2": "@", "3": "#", "4": "$", "5": "%",
+        "6": "^", "7": "&", "8": "*", "9": "(", "0": ")", "-": "_",
+        "=": "+", "[": "{", "]": "}", "\\": "|", ";": ":", "'": "\"",
+        ",": "<", ".": ">", "/": "?",
+    ]
+
     // Full QWERTY layout (numbers/punctuation included, real key placement)
     // per the reference design, rather than the old letters-only + a
     // separate function-key row. Sized down considerably from the first
@@ -930,12 +939,12 @@ struct VirtualKeyboardView: View {
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
-                keyButton("`") { send(vk: VK.backtick) }
+                keyButton(symbol("`")) { send(vk: VK.backtick) }
                 ForEach(topRow, id: \.self) { key in
-                    keyButton(key) { send(vk: UInt16(key.unicodeScalars.first!.value)) }
+                    keyButton(symbol(key)) { send(vk: UInt16(key.unicodeScalars.first!.value)) }
                 }
-                keyButton("-") { send(vk: VK.minus) }
-                keyButton("=") { send(vk: VK.equals) }
+                keyButton(symbol("-")) { send(vk: VK.minus) }
+                keyButton(symbol("=")) { send(vk: VK.equals) }
                 keyButton("Backspace", width: 100, tint: .red) { send(vk: VK.back) }
             }
             HStack(spacing: 6) {
@@ -945,9 +954,9 @@ struct VirtualKeyboardView: View {
                         send(vk: UInt16(key.unicodeScalars.first!.value))
                     }
                 }
-                keyButton("[") { send(vk: VK.leftBracket) }
-                keyButton("]") { send(vk: VK.rightBracket) }
-                keyButton("\\") { send(vk: VK.backslash) }
+                keyButton(symbol("[")) { send(vk: VK.leftBracket) }
+                keyButton(symbol("]")) { send(vk: VK.rightBracket) }
+                keyButton(symbol("\\")) { send(vk: VK.backslash) }
             }
             HStack(spacing: 6) {
                 ForEach(homeRow, id: \.self) { key in
@@ -955,8 +964,8 @@ struct VirtualKeyboardView: View {
                         send(vk: UInt16(key.unicodeScalars.first!.value))
                     }
                 }
-                keyButton(";") { send(vk: VK.semicolon) }
-                keyButton("'") { send(vk: VK.quote) }
+                keyButton(symbol(";")) { send(vk: VK.semicolon) }
+                keyButton(symbol("'")) { send(vk: VK.quote) }
                 keyButton("Enter", width: 100) { send(vk: VK.enter) }
             }
             HStack(spacing: 6) {
@@ -966,9 +975,9 @@ struct VirtualKeyboardView: View {
                         send(vk: UInt16(key.unicodeScalars.first!.value))
                     }
                 }
-                keyButton(",") { send(vk: VK.comma) }
-                keyButton(".") { send(vk: VK.period) }
-                keyButton("/") { send(vk: VK.slash) }
+                keyButton(symbol(",")) { send(vk: VK.comma) }
+                keyButton(symbol(".")) { send(vk: VK.period) }
+                keyButton(symbol("/")) { send(vk: VK.slash) }
             }
             HStack(spacing: 6) {
                 keyButton("Esc") { send(vk: VK.escape) }
@@ -1001,11 +1010,19 @@ struct VirtualKeyboardView: View {
         .frame(minWidth: width, minHeight: 40)
     }
 
-    /// Tap = press and release. `shifted` is reported as the modifier bit the
-    /// hardware-keyboard path uses, so capitals and symbols behave the same way.
+    private func symbol(_ key: String) -> String {
+        shifted ? shiftedSymbols[key] ?? key : key
+    }
+
+    /// Tap = press and release. The keyboard/button protocol carries no
+    /// modifier field, so while `shifted` a real Left Shift press is sent
+    /// around the key — the same way a hardware keyboard's Shift arrives.
     private func send(vk: UInt16) {
-        let modifiers: UInt16 = shifted ? 0x0001 : 0
-        inputHandler?.sendKeyEvent(down: true, vk: vk, scancode: 0, modifiers: modifiers)
-        inputHandler?.sendKeyEvent(down: false, vk: vk, scancode: 0, modifiers: modifiers)
+        if shifted {
+            inputHandler?.sendKeyCombo([VK.shift, vk])
+        } else {
+            inputHandler?.sendKeyEvent(down: true, vk: vk, scancode: 0, modifiers: 0)
+            inputHandler?.sendKeyEvent(down: false, vk: vk, scancode: 0, modifiers: 0)
+        }
     }
 }

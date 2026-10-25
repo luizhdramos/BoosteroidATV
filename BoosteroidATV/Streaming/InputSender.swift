@@ -18,6 +18,7 @@ extension Notification.Name {
 // keyboard/mouse capture code (HID → VK/scancode mapping) can be reused as-is.
 protocol InputEventHandler: AnyObject {
     func sendKeyEvent(down: Bool, vk: UInt16, scancode: UInt16, modifiers: UInt16)
+    func sendKeyCombo(_ vks: [UInt16])
     func sendMouseMove(dx: Int16, dy: Int16)
     /// Absolute pointer position, in the streamed surface's pixels.
     func sendMouseAbsolute(x: Int, y: Int)
