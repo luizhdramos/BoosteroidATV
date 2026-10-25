@@ -194,6 +194,7 @@ struct SettingsView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .focusSection()
         }
     }
 }
